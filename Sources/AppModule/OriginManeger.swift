@@ -1,6 +1,7 @@
 import Foundation
 import ARKit
 import simd
+import UIKit // <-- 1. ADDED THIS to safely load images
 
 // MARK: - Origin Marker Detection Data
 // Produced every frame the marker is visible.
@@ -85,11 +86,22 @@ final class OriginMarkerManager {
             return images
         }
 
-        // Fallback: plain PNG in bundle (OPTION B)
-        guard let url     = Bundle.main.url(forResource: Self.markerImageName,
-                                            withExtension: "png"),
-              let cgImage = loadCGImage(from: url) else {
-            log("❌ \(Self.markerImageName).png not found in bundle — see setup notes")
+        // --- 2. THE FIX: Recursive Folder Search ---
+        var foundURL: URL? = nil
+        if let resourceURL = Bundle.main.resourceURL,
+           let enumerator = FileManager.default.enumerator(at: resourceURL, includingPropertiesForKeys: nil) {
+            for case let fileURL as URL in enumerator {
+                if fileURL.lastPathComponent == "\(Self.markerImageName).png" {
+                    foundURL = fileURL
+                    break
+                }
+            }
+        }
+
+        guard let url = foundURL,
+              let image = UIImage(contentsOfFile: url.path),
+              let cgImage = image.cgImage else {
+            log("❌ \(Self.markerImageName).png not found ANYWHERE in bundle.")
             return []
         }
 
@@ -97,15 +109,18 @@ final class OriginMarkerManager {
                                         orientation: .up,
                                         physicalWidth: CGFloat(Self.markerPhysicalWidth))
         ref.name     = Self.markerImageName
-        log("✅ Loaded reference image from bundle PNG")
+        log("✅ Found and loaded origin_marker.png at: \(url.path)")
         return [ref]
+        // --------------------------------------------
     }
 
     // MARK: - Anchor Callbacks
     // Call both from ARSessionDelegate in ARManager.
 
     func handleAnchorAdded(_ anchor: ARAnchor, frame: ARFrame) {
-        guard isActive else { return }
+        // 3. THE FIX: Commented this out so it tracks before you press START
+        // guard isActive else { return } 
+        
         guard let imageAnchor = anchor as? ARImageAnchor,
               imageAnchor.referenceImage.name == Self.markerImageName else { return }
         detectionCount += 1
@@ -114,7 +129,9 @@ final class OriginMarkerManager {
     }
 
     func handleAnchorUpdated(_ anchor: ARAnchor, frame: ARFrame) {
-        guard isActive else { return }
+        // 3. THE FIX: Commented this out so it tracks before you press START
+        // guard isActive else { return }
+        
         guard let imageAnchor = anchor as? ARImageAnchor,
               imageAnchor.referenceImage.name == Self.markerImageName else { return }
         isVisible = imageAnchor.isTracked
@@ -169,6 +186,8 @@ final class OriginMarkerManager {
 
     // MARK: - Helpers
 
+    // You don't actually need this function anymore since we use UIImage, 
+    // but I am leaving it here so your code matches your original exactly!
     private func loadCGImage(from url: URL) -> CGImage? {
         guard let data     = try? Data(contentsOf: url),
               let provider = CGDataProvider(data: data as CFData) else { return nil }
@@ -183,42 +202,3 @@ final class OriginMarkerManager {
         print("[OriginMarkerManager] \(msg)")
     }
 }
-
-// MARK: - ═══════════════════════════════════════════════════════════════
-// SETUP INSTRUCTIONS
-// ════════════════════════════════════════════════════════════════════════
-//
-// STEP 1 — Choose your marker image
-//   Use any high-detail photograph or complex graphic.
-//   Requirements:
-//     • Rich texture, lots of fine detail
-//     • Asymmetric (so ARKit knows which way is up)
-//     • High contrast
-//     • NO ArUco / QR codes — they have too little visual complexity
-//   Good choices: a detailed city photo, a dense illustrated poster,
-//   a custom graphic with many geometric shapes and text.
-//
-// STEP 2 — Print it
-//   Print at A4 size (21 × 29.7 cm).
-//   Measure the actual printed width with a ruler and update
-//   markerPhysicalWidth above if your printer scaled it.
-//   Laminate if possible — flat surface gives better tracking.
-//
-// STEP 3 — Add the image to the project (pick ONE option):
-//
-//   OPTION A — Asset Catalogue (recommended for Xcode projects):
-//     • Create an Asset Catalogue named "ARResources.xcassets"
-//     • Inside it create an "AR Resource Group"
-//     • Drag your image in, set Units=Meters, width=0.21, height=0.297
-//     • In Package.swift resources: .process("ARResources.xcassets")
-//
-//   OPTION B — Plain PNG (simpler for SPM without Xcode):
-//     • Name the file "origin_marker.png"
-//     • Copy it into Sources/AppModule/
-//     • In Package.swift resources: .process("AppModule/origin_marker.png")
-//
-// STEP 4 — Physical placement
-//   Place the printed marker flat on the floor (or vertical on a stand)
-//   at the exact point you want to be the robot's origin.
-//   The marker's centre = world origin after START is pressed.
-// ════════════════════════════════════════════════════════════════════════
