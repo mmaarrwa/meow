@@ -1,7 +1,7 @@
 import Foundation
 import ARKit
 import simd
-import UIKit // <-- 1. ADDED THIS to safely load images
+import UIKit 
 
 // MARK: - Origin Marker Detection Data
 // Produced every frame the marker is visible.
@@ -85,7 +85,9 @@ final class OriginMarkerManager {
             if let image = UIImage(named: Self.markerImageName, in: bundle, compatibleWith: nil),
                let cgImage = image.cgImage {
                 log("✅ Found origin_marker inside compiled assets of bundle: \(bundle.bundleURL.lastPathComponent)")
-                let ref = ARReferenceImage(cgImage: cgImage, orientation: .up, physicalWidth: CGFloat(Self.markerPhysicalWidth))
+                
+                // FIXED: Removed 'cgImage:' label
+                let ref = ARReferenceImage(cgImage, orientation: .up, physicalWidth: CGFloat(Self.markerPhysicalWidth))
                 ref.name = Self.markerImageName
                 return [ref]
             }
@@ -100,7 +102,9 @@ final class OriginMarkerManager {
                         log("✅ Found loose origin_marker.png at: \(fileURL.path)")
                         if let img = UIImage(contentsOfFile: fileURL.path),
                            let cg = img.cgImage {
-                            let ref = ARReferenceImage(cgImage: cg, orientation: .up, physicalWidth: CGFloat(Self.markerPhysicalWidth))
+                            
+                            // FIXED: Removed 'cgImage:' label
+                            let ref = ARReferenceImage(cg, orientation: .up, physicalWidth: CGFloat(Self.markerPhysicalWidth))
                             ref.name = Self.markerImageName
                             return [ref]
                         }
@@ -137,7 +141,7 @@ final class OriginMarkerManager {
         if imageAnchor.isTracked {
             process(imageAnchor, frame: frame)
         } else {
-            log("👁 Origin marker left view")
+            // Uncomment if you want spammy logs: log("👁 Origin marker left view")
         }
     }
 
@@ -185,8 +189,6 @@ final class OriginMarkerManager {
 
     // MARK: - Helpers
 
-    // You don't actually need this function anymore since we use UIImage, 
-    // but I am leaving it here so your code matches your original exactly!
     private func loadCGImage(from url: URL) -> CGImage? {
         guard let data     = try? Data(contentsOf: url),
               let provider = CGDataProvider(data: data as CFData) else { return nil }
