@@ -6,7 +6,6 @@ workflows:
     scripts:
       - name: Build archive
         script: |
-          # Build and force CoreML model compilation (yolov8n.mlpackage → .mlmodelc)
           xcodebuild archive \
             -scheme "meow" \
             -archivePath "$CM_BUILD_DIR/meow.xcarchive" \
@@ -31,8 +30,7 @@ workflows:
           echo "Found binary: $BINARY_SOURCE"
           cp "$BINARY_SOURCE" "$APP_BUNDLE/meow"
 
-          # 2. Find and copy the compiled CoreML model (.mlmodelc)
-          #    Xcode compiles .mlpackage → .mlmodelc during the archive step
+          # 2. Find and copy the compiled CoreML model
           MLMODEL_SOURCE=$(find "$CM_BUILD_DIR/meow.xcarchive" -name "yolov8n.mlmodelc" -type d | head -n 1)
           if [ -z "$MLMODEL_SOURCE" ]; then
             echo "Warning: Could not find compiled yolov8n.mlmodelc — detection will not run!"
@@ -44,7 +42,18 @@ workflows:
           # 3. Copy Info.plist
           cp "$CM_BUILD_DIR/Info.plist" "$APP_BUNDLE/Info.plist"
 
-          # 4. Zip into .ipa
+          # 4. Find and copy origin_marker.png
+          #    SPM processes it into the bundle resources during archive
+          MARKER_SOURCE=$(find "$CM_BUILD_DIR/meow.xcarchive" -name "origin_marker.png" | head -n 1)
+          if [ -z "$MARKER_SOURCE" ]; then
+            echo "Warning: Could not find origin_marker.png in archive!"
+            echo "Make sure it is listed in Package.swift resources."
+          else
+            echo "Found origin marker: $MARKER_SOURCE"
+            cp "$MARKER_SOURCE" "$APP_BUNDLE/origin_marker.png"
+          fi
+
+          # 5. Zip into .ipa
           cd "$IPA_DIR"
           zip -r "meow.ipa" "Payload"
 
