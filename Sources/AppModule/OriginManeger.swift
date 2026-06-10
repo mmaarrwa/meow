@@ -34,8 +34,8 @@ final class OriginMarkerManager {
 
     /// Physical width of the printed marker in metres.
     /// Measure with a ruler after printing — this is critical for accurate depth.
-    static let markerPhysicalWidth: Float  = 0.23
-    static let markerPhysicalHeight: Float = 0.23
+    static let markerPhysicalWidth: Float  = 0.116
+    static let markerPhysicalHeight: Float = 0.275
 
     /// The image name as it appears in the asset catalogue AR group
     /// or as a plain PNG in the bundle.
