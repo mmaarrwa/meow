@@ -78,40 +78,39 @@ final class OriginMarkerManager {
     // MARK: - Reference Image Setup
     // Call this when building the ARWorldTrackingConfiguration.
 
+    // MARK: - Invincible Image Loader
     func referenceImages() -> Set<ARReferenceImage> {
-        // Try asset catalogue first (OPTION A)
-        if let images = ARReferenceImage.referenceImages(
-            inGroupNamed: "ARResources", bundle: .main), !images.isEmpty {
-            log("✅ Loaded \(images.count) reference image(s) from asset catalogue")
-            return images
-        }
-
-        // --- 2. THE FIX: Recursive Folder Search ---
-        var foundURL: URL? = nil
-        if let resourceURL = Bundle.main.resourceURL,
-           let enumerator = FileManager.default.enumerator(at: resourceURL, includingPropertiesForKeys: nil) {
-            for case let fileURL as URL in enumerator {
-                if fileURL.lastPathComponent == "\(Self.markerImageName).png" {
-                    foundURL = fileURL
-                    break
-                }
+        // 1. Check inside Apple's hidden compiled databases (Assets.car)
+        for bundle in Bundle.allBundles {
+            if let image = UIImage(named: Self.markerImageName, in: bundle, compatibleWith: nil),
+               let cgImage = image.cgImage {
+                log("✅ Found origin_marker inside compiled assets of bundle: \(bundle.bundleURL.lastPathComponent)")
+                let ref = ARReferenceImage(cgImage: cgImage, orientation: .up, physicalWidth: CGFloat(Self.markerPhysicalWidth))
+                ref.name = Self.markerImageName
+                return [ref]
             }
         }
 
-        guard let url = foundURL,
-              let image = UIImage(contentsOfFile: url.path),
-              let cgImage = image.cgImage else {
-            log("❌ \(Self.markerImageName).png not found ANYWHERE in bundle.")
-            return []
+        // 2. Fallback: Brute-Force Folder Search (If it is sitting loose in a folder)
+        if let resourceURL = Bundle.main.resourceURL {
+            let fm = FileManager.default
+            if let enumerator = fm.enumerator(at: resourceURL, includingPropertiesForKeys: nil) {
+                for case let fileURL as URL in enumerator {
+                    if fileURL.lastPathComponent == "\(Self.markerImageName).png" {
+                        log("✅ Found loose origin_marker.png at: \(fileURL.path)")
+                        if let img = UIImage(contentsOfFile: fileURL.path),
+                           let cg = img.cgImage {
+                            let ref = ARReferenceImage(cgImage: cg, orientation: .up, physicalWidth: CGFloat(Self.markerPhysicalWidth))
+                            ref.name = Self.markerImageName
+                            return [ref]
+                        }
+                    }
+                }
+            }
         }
-
-        let ref      = ARReferenceImage(cgImage,
-                                        orientation: .up,
-                                        physicalWidth: CGFloat(Self.markerPhysicalWidth))
-        ref.name     = Self.markerImageName
-        log("✅ Found and loaded origin_marker.png at: \(url.path)")
-        return [ref]
-        // --------------------------------------------
+        
+        log("❌ origin_marker not found in Assets OR loose folders.")
+        return []
     }
 
     // MARK: - Anchor Callbacks
