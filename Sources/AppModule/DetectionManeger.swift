@@ -304,6 +304,8 @@ final class DetectionManager {
             let local = simd_mul(worldToCam, simd_float4(p.x, p.y, p.z, 1))
             let absZ  = -local.z
             guard absZ > fpNearZ && absZ < fpFarZ else { continue }
+            // Add the offset check here if you want to ignore high points (like ceilings)
+            guard local.y > -0.55 && local.y < -0.05 else { continue }
             guard abs(local.x / absZ) <= coneW,
                   abs(local.y / absZ) <= coneH else { continue }
             count += 1
