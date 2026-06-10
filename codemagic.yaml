@@ -1,0 +1,52 @@
+workflows:
+  ios-build:
+    name: meow iOS Build
+    environment:
+      xcode: latest
+    scripts:
+      - name: Build archive
+        script: |
+          # Build and force CoreML model compilation (yolov8n.mlpackage → .mlmodelc)
+          xcodebuild archive \
+            -scheme "meow" \
+            -archivePath "$CM_BUILD_DIR/meow.xcarchive" \
+            -destination "generic/platform=iOS" \
+            COREML_CODEGEN_LANGUAGE=Swift
+
+      - name: Construct Manual .ipa
+        script: |
+          IPA_DIR="$CM_BUILD_DIR/build/ios/ipa"
+          PAYLOAD_DIR="$IPA_DIR/Payload"
+          APP_BUNDLE="$PAYLOAD_DIR/meow.app"
+
+          echo "Creating App Bundle..."
+          mkdir -p "$APP_BUNDLE"
+
+          # 1. Find and copy the compiled binary
+          BINARY_SOURCE=$(find "$CM_BUILD_DIR/meow.xcarchive" -name "meow" -type f | head -n 1)
+          if [ -z "$BINARY_SOURCE" ]; then
+            echo "Error: Could not find compiled binary!"
+            exit 1
+          fi
+          echo "Found binary: $BINARY_SOURCE"
+          cp "$BINARY_SOURCE" "$APP_BUNDLE/meow"
+
+          # 2. Find and copy the compiled CoreML model (.mlmodelc)
+          #    Xcode compiles .mlpackage → .mlmodelc during the archive step
+          MLMODEL_SOURCE=$(find "$CM_BUILD_DIR/meow.xcarchive" -name "yolov8n.mlmodelc" -type d | head -n 1)
+          if [ -z "$MLMODEL_SOURCE" ]; then
+            echo "Warning: Could not find compiled yolov8n.mlmodelc — detection will not run!"
+          else
+            echo "Found ML model: $MLMODEL_SOURCE"
+            cp -r "$MLMODEL_SOURCE" "$APP_BUNDLE/"
+          fi
+
+          # 3. Copy Info.plist
+          cp "$CM_BUILD_DIR/Info.plist" "$APP_BUNDLE/Info.plist"
+
+          # 4. Zip into .ipa
+          cd "$IPA_DIR"
+          zip -r "meow.ipa" "Payload"
+
+    artifacts:
+      - build/ios/ipa/*.ipa
