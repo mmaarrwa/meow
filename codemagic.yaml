@@ -42,22 +42,17 @@ workflows:
           # 3. Copy Info.plist
           cp "$CM_BUILD_DIR/Info.plist" "$APP_BUNDLE/Info.plist"
 
-          # 4. Find and copy origin_marker.png with HEAVY DEBUGGING
-          echo "🔍 --- DEBUGGING IMAGE PATH ---"
-          echo "Contents of the AppModule folder:"
-          ls -la "$CM_CLONE_DIR/Sources/AppModule/" || echo "Directory not found!"
-          
-          MARKER_FILE="$CM_CLONE_DIR/Sources/AppModule/origin_marker.png"
+          # 4. Copy origin_marker.png directly from source code
+          echo "Copying origin_marker.png..."
+          MARKER_FILE="$CM_BUILD_DIR/Sources/AppModule/origin_marker.png"
           
           if [ -f "$MARKER_FILE" ]; then
               echo "✅ FOUND IT! Copying origin_marker.png to App Bundle..."
               cp "$MARKER_FILE" "$APP_BUNDLE/origin_marker.png"
           else
-              echo "❌ ERROR: origin_marker.png is NOT exactly at $MARKER_FILE"
-              echo "🔍 Searching the entire repository just in case..."
-              find "$CM_CLONE_DIR" -iname "*origin_marker*"
+              echo "❌ ERROR: Still not found at $MARKER_FILE"
+              ls -la "$CM_BUILD_DIR/Sources/AppModule/"
           fi
-          echo "-------------------------------"
           
           # 5. Zip into .ipa
           cd "$IPA_DIR"
