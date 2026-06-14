@@ -42,17 +42,10 @@ workflows:
           # 3. Copy Info.plist
           cp "$CM_BUILD_DIR/Info.plist" "$APP_BUNDLE/Info.plist"
 
-          # 4. Find and copy origin_marker.png
-          #    SPM processes it into the bundle resources during archive
-          MARKER_SOURCE=$(find "$CM_BUILD_DIR/meow.xcarchive" -name "origin_marker.png" | head -n 1)
-          if [ -z "$MARKER_SOURCE" ]; then
-            echo "Warning: Could not find origin_marker.png in archive!"
-            echo "Make sure it is listed in Package.swift resources."
-          else
-            echo "Found origin marker: $MARKER_SOURCE"
-            cp "$MARKER_SOURCE" "$APP_BUNDLE/origin_marker.png"
-          fi
-
+          # 4. Copy origin_marker.png directly from source code
+          echo "Copying origin_marker.png..."
+          cp "$CM_CLONE_DIR/Sources/AppModule/origin_marker.png" "$APP_BUNDLE/origin_marker.png"
+          
           # 5. Zip into .ipa
           cd "$IPA_DIR"
           zip -r "meow.ipa" "Payload"
