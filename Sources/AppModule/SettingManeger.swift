@@ -20,6 +20,12 @@ final class SettingsManager: ObservableObject {
     @Published var numScanRows: Int {
         didSet { UserDefaults.standard.set(numScanRows, forKey: "numScanRows") }
     }
+    @Published var smoothingAlpha: Float {
+        didSet { UserDefaults.standard.set(smoothingAlpha, forKey: "smoothingAlpha") }
+    }
+    @Published var maxMissTolerance: Int {
+        didSet { UserDefaults.standard.set(maxMissTolerance, forKey: "maxMissTolerance") }
+    }
     @Published var verticalCenterOffset: Double {
         didSet { UserDefaults.standard.set(verticalCenterOffset, forKey: "verticalCenterOffset") }
     }
@@ -51,6 +57,10 @@ final class SettingsManager: ObservableObject {
                                 .nonZero ?? 30
         numScanRows          = UserDefaults.standard.integer(forKey: "numScanRows")
                                 .nonZero ?? 5
+        smoothingAlpha       = UserDefaults.standard.float(forKey: "smoothingAlpha")
+                                .nonZero ?? 0.2
+        maxMissTolerance     = UserDefaults.standard.integer(forKey: "maxMissTolerance")
+                                .nonZero ?? 3
         verticalCenterOffset = UserDefaults.standard.double(forKey: "verticalCenterOffset")
                                 .nonZero ?? 0.65
         verticalSpread       = UserDefaults.standard.double(forKey: "verticalSpread")

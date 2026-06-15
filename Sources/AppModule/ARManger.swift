@@ -34,7 +34,8 @@ final class ARManager: NSObject, ObservableObject {
     private let historyLength = 2
 
     // Laser scan smoothing — sized dynamically from settings
-    private var smoothedScan: [Float] = Array(repeating: 10.0, count: 30)
+    private var smoothedScan: [Float] = []
+    private var missCounters: [Int] = []
 
     // MARK: - Init
     override init() {
@@ -93,9 +94,6 @@ final class ARManager: NSObject, ObservableObject {
     func startStreaming() {
         isStreaming = true
 
-        // Reset scan smoothing array to match current column count
-        smoothedScan = Array(repeating: 10.0, count: settings.numScanColumns)
-
         // Reset origin marker — discard any pre-START sightings
         OriginMarkerManager.shared.isActive = false
         OriginMarkerManager.shared.isActive = true
@@ -103,6 +101,11 @@ final class ARManager: NSObject, ObservableObject {
         // Reset ARKit — current position becomes (0,0,0)
         let config = buildConfig()
         sceneView.session.run(config, options: [.resetTracking, .removeExistingAnchors])
+
+        // Safely resize arrays based on current UI setting
+        let cols = settings.numScanColumns
+        smoothedScan = Array(repeating: 10.0, count: cols)
+        missCounters = Array(repeating: 0, count: cols)
 
         // One Timer drives everything at 10Hz on main thread
         scanTimer = Timer.scheduledTimer(withTimeInterval: 0.1,
@@ -157,11 +160,31 @@ final class ARManager: NSObject, ObservableObject {
         let cols = settings.numScanColumns
         if smoothedScan.count != cols {
             smoothedScan = Array(repeating: 10.0, count: cols)
+            missCounters = Array(repeating: 0, count: cols)
         }
         let alpha = settings.smoothingAlpha
+        let maxMissTolerance = settings.maxMissTolerance
         for i in 0..<cols {
-            smoothedScan[i] = (alpha * scanArray[i]) +
-                               ((1.0 - alpha) * smoothedScan[i])
+            if scanArray[i] < 9.9 {
+                // STATE 1: REAL HIT (Obstacle Detected)
+                if smoothedScan[i] >= 9.9 {
+                    // Instant snap on new obstacle appearance!
+                    smoothedScan[i] = scanArray[i] 
+                } else {
+                    // Standard noise smoothing for existing obstacles
+                    smoothedScan[i] = (alpha * scanArray[i]) + ((1.0 - alpha) * smoothedScan[i])
+                }
+                missCounters[i] = 0 // Reset miss counter because we saw something!
+                
+            } else {
+                // STATE 2 & 3: MISS (Looking at empty space)
+                missCounters[i] += 1
+                
+                if missCounters[i] >= maxMissTolerance {
+                    // STATE 3: CONFIRMED CLEAR
+                    smoothedScan[i] = 10.0
+                } 
+            }
         }
 
         // ── System A: YOLO — dispatch to background ─────────────────
@@ -473,9 +496,4 @@ extension ARManager: ARSessionDelegate {
     func sessionInterruptionEnded(_ session: ARSession) {
         sceneView.session.run(buildConfig())
     }
-}
-
-// MARK: - SettingsManager smoothingAlpha extension
-extension SettingsManager {
-    var smoothingAlpha: Float { 0.2 }
 }

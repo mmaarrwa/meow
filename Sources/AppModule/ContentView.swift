@@ -260,6 +260,28 @@ struct SettingsSidebar: View {
                         .pickerStyle(.segmented)
                         .colorMultiply(.cyan)
                     }
+                    
+                    SettingsRow(label: "Smoothing") {
+                        VStack(spacing: 2) {
+                            Slider(value: $settings.smoothingAlpha,
+                                   in: 0.1...1.0, step: 0.1)
+                                .accentColor(.cyan)
+                            Text(String(format: "%.1f (1.0 = Off)", settings.smoothingAlpha))
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundColor(.cyan)
+                        }
+                    }
+
+                    SettingsRow(label: "Ghost Filter") {
+                        Picker("", selection: $settings.maxMissTolerance) {
+                            Text("1").tag(1)
+                            Text("2").tag(2)
+                            Text("3").tag(3)
+                            Text("5").tag(5)
+                        }
+                        .pickerStyle(.segmented)
+                        .colorMultiply(.cyan)
+                    }
 
                     Divider().background(Color.gray.opacity(0.4))
 
