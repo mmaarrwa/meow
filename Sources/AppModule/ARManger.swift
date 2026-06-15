@@ -90,7 +90,7 @@ final class ARManager: NSObject, ObservableObject {
         }
     }
 
-    private func startStreaming() {
+    func startStreaming() {
         isStreaming = true
 
         // Reset scan smoothing array to match current column count
@@ -113,7 +113,7 @@ final class ARManager: NSObject, ObservableObject {
         network.sendLog("▶️ START — ARKit origin reset")
     }
 
-    private func stopStreaming() {
+    func stopStreaming() {
         isStreaming = false
         scanTimer?.invalidate()
         scanTimer = nil

@@ -67,6 +67,22 @@ struct ContentView: View {
                             .font(.system(size: 12, weight: .semibold, design: .monospaced))
                             .foregroundColor(.white)
                         Spacer()
+                        //adding start/stop button 
+                        Button(action: {
+                            if arManager.isStreaming {
+                                arManager.stopStreaming()
+                            } else {
+                                arManager.startStreaming()
+                            }
+                        }) {
+                            Text(arManager.isStreaming ? "STOP" : "START")
+                                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 6)
+                                .background(arManager.isStreaming ? Color.red : Color.green)
+                                .foregroundColor(.white)
+                                .cornerRadius(6)
+                        }
                     }
                     HStack(spacing: 8) {
                         Image(systemName: "wifi").foregroundColor(.gray).frame(width: 18)
