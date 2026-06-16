@@ -42,6 +42,14 @@ final class SettingsManager: ObservableObject {
         didSet { UserDefaults.standard.set(minRayDistance, forKey: "minRayDistance") }
     }
 
+    //debugging features
+    @Published var showDebugPlanes: Bool {
+        didSet { UserDefaults.standard.set(showDebugPlanes, forKey: "showDebugPlanes") }
+    }
+    @Published var showDebugMesh: Bool {
+        didSet { UserDefaults.standard.set(showDebugMesh, forKey: "showDebugMesh") }
+    }
+
     // MARK: - Detection (System A)
     @Published var confidenceThreshold: Float {
         didSet { UserDefaults.standard.set(confidenceThreshold, forKey: "confidenceThreshold") }
@@ -76,6 +84,8 @@ final class SettingsManager: ObservableObject {
                                 .nonZero ?? 0.15
         confidenceThreshold  = UserDefaults.standard.float(forKey: "confidenceThreshold")
                                 .nonZero ?? 0.40
+        showDebugPlanes = UserDefaults.standard.bool(forKey: "showDebugPlanes")
+        showDebugMesh   = UserDefaults.standard.bool(forKey: "showDebugMesh")
         serverIP             = UserDefaults.standard.string(forKey: "serverIP") ?? "192.168.1.10"
     }
 }

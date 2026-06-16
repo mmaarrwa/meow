@@ -41,6 +41,7 @@ final class NetworkManager {
     func stop() {
         connection?.cancel()
         connection = nil
+        onCommandReceived = nil
     }
 
     func sendPose(_ pose: [String: Any]) {

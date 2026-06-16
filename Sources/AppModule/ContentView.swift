@@ -96,12 +96,17 @@ struct ContentView: View {
                             .foregroundColor(.white)
                         Button(action: {
                             hideKeyboard()
-                            arManager.connectToNetwork()
+                            if arManager.isConnected {
+                                arManager.disconnectFromNetwork()
+                            } else {
+                                arManager.connectToNetwork()
+                            }
                         }) {
-                            Text("Connect")
+                            Text(arManager.isConnected ? "Disconnect" : "Connect")
                                 .font(.caption.bold())
-                                .padding(.horizontal, 14).padding(.vertical, 8)
-                                .background(Color.blue)
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 8)
+                                .background(arManager.isConnected ? Color.red : Color.blue)
                                 .foregroundColor(.white)
                                 .cornerRadius(6)
                         }
@@ -293,6 +298,23 @@ struct SettingsSidebar: View {
                         .pickerStyle(.segmented)
                         .colorMultiply(.cyan)
                     }
+
+                    Divider().background(Color.gray.opacity(0.4))
+
+                    // ── Debug Visuals ────────────────────────────────
+                    SectionHeader("Debug Visuals")
+
+                    Toggle("Show AR Planes", isOn: $settings.showDebugPlanes)
+                        .font(.system(size: 13, design: .monospaced))
+                        .foregroundColor(.white)
+                        .tint(.cyan)
+                        .padding(.vertical, 4)
+
+                    Toggle("Show LiDAR Mesh", isOn: $settings.showDebugMesh)
+                        .font(.system(size: 13, design: .monospaced))
+                        .foregroundColor(.white)
+                        .tint(.cyan)
+                        .padding(.vertical, 4)
 
                     Divider().background(Color.gray.opacity(0.4))
 

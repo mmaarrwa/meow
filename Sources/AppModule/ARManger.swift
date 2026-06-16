@@ -3,6 +3,7 @@ import ARKit
 import SceneKit
 import simd
 import SwiftUI
+import Combine
 
 final class ARManager: NSObject, ObservableObject {
     static let shared = ARManager()
@@ -14,6 +15,7 @@ final class ARManager: NSObject, ObservableObject {
     @Published var lastImageSize: CGSize = CGSize(width: 1920, height: 1440)
     @Published var isOriginVisible: Bool = false
     @Published var originData: OriginMarkerData? = nil
+    @Published var isConnected:   Bool  = false
 
     // MARK: - AR Scene View
     let sceneView: ARSCNView = {
@@ -29,6 +31,9 @@ final class ARManager: NSObject, ObservableObject {
     private let settings = SettingsManager.shared
     private var scanTimer: Timer?
 
+    // MARK: - Combine
+    private var cancellables = Set<AnyCancellable>()
+
     // Detection smoothing
     private var detectionHistory: [[DetectedObject]] = []
     private let historyLength = 2
@@ -40,6 +45,9 @@ final class ARManager: NSObject, ObservableObject {
     // MARK: - Init
     override init() {
         super.init()
+
+        //send the 3d updates
+        sceneView.delegate = self
 
         DetectionManager.shared.sceneView = sceneView
 
@@ -65,6 +73,30 @@ final class ARManager: NSObject, ObservableObject {
         network.onCommandReceived = { [weak self] command in
             self?.handleRemoteCommand(command)
         }
+
+        // Listen for LiDAR Mesh Toggle
+        settings.$showDebugMesh.sink { [weak self] show in
+            DispatchQueue.main.async { self?.updateDebugOptions(showMesh: show) }
+        }.store(in: &cancellables)
+
+        // Listen for Plane Toggle (Hide/Show existing planes instantly)
+        settings.$showDebugPlanes.sink { [weak self] show in
+            DispatchQueue.main.async {
+                self?.sceneView.scene.rootNode.enumerateChildNodes { (node, _) in
+                    if node.name == "DebugPlane" { node.isHidden = !show }
+                }
+            }
+        }.store(in: &cancellables)
+
+    }
+
+    private func updateDebugOptions(showMesh: Bool) {
+        var options: ARSCNDebugOptions = [.showFeaturePoints]
+        if showMesh {
+            // This renders the LiDAR wireframe
+            options.insert(.showSceneUnderstanding) 
+        }
+        sceneView.debugOptions = options
     }
 
     // MARK: - Session Management
@@ -81,6 +113,15 @@ final class ARManager: NSObject, ObservableObject {
     func connectToNetwork() {
         network.start(ipAddress: settings.serverIP)
         network.sendLog("📡 Connected — waiting for START command")
+    }
+    
+    func disconnectFromNetwork() {
+        // Safety check: if they disconnect while the robot is driving, stop streaming first!
+        if isStreaming { 
+            stopStreaming() 
+        }
+        network.stop() // Stops the UDP socket
+        isConnected = false // Tell the UI we disconnected
     }
 
     private func handleRemoteCommand(_ command: String) {
@@ -500,3 +541,42 @@ extension ARManager: ARSessionDelegate {
         sceneView.session.run(buildConfig())
     }
 }
+
+// MARK: - ARSCNViewDelegate (Handles Plane Rendering)
+extension ARManager: ARSCNViewDelegate {
+    
+    // When ARKit finds a new plane
+    func renderer(_ renderer: SCNSceneRenderer, didAdd node: SCNNode, for anchor: ARAnchor) {
+        guard let planeAnchor = anchor as? ARPlaneAnchor else { return }
+        
+        // Create a 3D flat surface
+        let plane = SCNPlane(width: CGFloat(planeAnchor.extent.x), height: CGFloat(planeAnchor.extent.z))
+        
+        // Blue for floors, Orange for walls
+        let color = planeAnchor.alignment == .horizontal ? UIColor.blue : UIColor.orange
+        plane.materials.first?.diffuse.contents = color.withAlphaComponent(0.4) // Semi-transparent
+        
+        let planeNode = SCNNode(geometry: plane)
+        planeNode.position = SCNVector3(planeAnchor.center.x, 0, planeAnchor.center.z)
+        planeNode.eulerAngles.x = -.pi / 2 // Lay it flat against the surface
+        planeNode.name = "DebugPlane"
+        planeNode.isHidden = !settings.showDebugPlanes // Check user toggle
+        
+        node.addChildNode(planeNode)
+    }
+
+    // When ARKit refines the size of the plane
+    func renderer(_ renderer: SCNSceneRenderer, didUpdate node: SCNNode, for anchor: ARAnchor) {
+        guard let planeAnchor = anchor as? ARPlaneAnchor else { return }
+        guard let planeNode = node.childNodes.first(where: { $0.name == "DebugPlane" }) else { return }
+        guard let plane = planeNode.geometry as? SCNPlane else { return }
+        
+        // Update size and position
+        plane.width = CGFloat(planeAnchor.extent.x)
+        plane.height = CGFloat(planeAnchor.extent.z)
+        planeNode.position = SCNVector3(planeAnchor.center.x, 0, planeAnchor.center.z)
+        planeNode.isHidden = !settings.showDebugPlanes
+    }
+}
+
+
