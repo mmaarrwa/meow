@@ -20,9 +20,9 @@ final class ARManager: NSObject, ObservableObject {
     // MARK: - AR Scene View
     let sceneView: ARSCNView = {
         let v = ARSCNView(frame: .zero)
-        v.autoenablesDefaultLighting = false
+        v.autoenablesDefaultLighting = true
         v.debugOptions = [ARSCNDebugOptions.showFeaturePoints]
-        v.rendersContinuously = false
+        v.rendersContinuously = true
         return v
     }()
 
@@ -556,17 +556,22 @@ extension ARManager: ARSessionDelegate {
 extension ARManager: ARSCNViewDelegate {
     
     // When ARKit finds a new plane OR a new LiDAR mesh chunk
+    // When ARKit finds a new plane OR a new LiDAR mesh chunk
     func renderer(_ renderer: SCNSceneRenderer, nodeFor anchor: ARAnchor) -> SCNNode? {
         let node = SCNNode()
         
         // 1. Handle Planes
         if let planeAnchor = anchor as? ARPlaneAnchor {
-            // FIXED: iOS 16 planeExtent uses width and height
             let plane = SCNPlane(width: CGFloat(planeAnchor.planeExtent.width), 
                                  height: CGFloat(planeAnchor.planeExtent.height))
             
+            // FIX: Explicitly create a glowing material
+            let material = SCNMaterial()
             let color = planeAnchor.alignment == .horizontal ? UIColor.blue : UIColor.orange
-            plane.materials.first?.diffuse.contents = color.withAlphaComponent(0.4)
+            material.diffuse.contents = color.withAlphaComponent(0.6) // Made it slightly less transparent
+            material.lightingModel = .constant // Makes it glow like neon regardless of shadows
+            material.isDoubleSided = true      // Lets you see it from underneath
+            plane.materials = [material]
             
             let planeNode = SCNNode(geometry: plane)
             planeNode.position = SCNVector3(planeAnchor.center.x, 0, planeAnchor.center.z)
@@ -583,8 +588,9 @@ extension ARManager: ARSCNViewDelegate {
             
             // Create a wireframe material
             let material = SCNMaterial()
-            material.diffuse.contents = UIColor.cyan.withAlphaComponent(0.5)
+            material.diffuse.contents = UIColor.cyan.withAlphaComponent(0.8)
             material.fillMode = .lines // Draws the matrix-style wireframe
+            material.lightingModel = .constant // Glows in the dark
             material.isDoubleSided = true
             geometry.materials = [material]
             
