@@ -74,6 +74,12 @@ final class ARManager: NSObject, ObservableObject {
             self?.handleRemoteCommand(command)
         }
 
+        network.onStateChanged = { [weak self] connected in
+            DispatchQueue.main.async {
+                self?.isConnected = connected
+            }
+        }
+
         // Listen for LiDAR Mesh Toggle
         settings.$showDebugMesh.sink { [weak self] show in
             DispatchQueue.main.async { self?.updateDebugOptions(showMesh: show) }
@@ -91,12 +97,15 @@ final class ARManager: NSObject, ObservableObject {
     }
 
     private func updateDebugOptions(showMesh: Bool) {
-        var options: ARSCNDebugOptions = [.showFeaturePoints]
-        if showMesh {
-            // This renders the LiDAR wireframe
-            options.insert(.showSceneUnderstanding) 
+        // 1. Feature points are always on
+        sceneView.debugOptions = [.showFeaturePoints]
+        
+        // 2. Instantly hide/show the manual LiDAR mesh we built in the delegate
+        sceneView.scene.rootNode.enumerateChildNodes { (node, _) in
+            if node.name == "DebugMesh" { 
+                node.isHidden = !showMesh 
+            }
         }
-        sceneView.debugOptions = options
     }
 
     // MARK: - Session Management
@@ -114,7 +123,7 @@ final class ARManager: NSObject, ObservableObject {
         network.start(ipAddress: settings.serverIP)
         network.sendLog("📡 Connected — waiting for START command")
     }
-    
+
     func disconnectFromNetwork() {
         // Safety check: if they disconnect while the robot is driving, stop streaming first!
         if isStreaming { 
@@ -542,40 +551,95 @@ extension ARManager: ARSessionDelegate {
     }
 }
 
-// MARK: - ARSCNViewDelegate (Handles Plane Rendering)
+
+// MARK: - ARSCNViewDelegate (Handles Plane & Mesh Rendering)
 extension ARManager: ARSCNViewDelegate {
     
-    // When ARKit finds a new plane
-    func renderer(_ renderer: SCNSceneRenderer, didAdd node: SCNNode, for anchor: ARAnchor) {
-        guard let planeAnchor = anchor as? ARPlaneAnchor else { return }
+    // When ARKit finds a new plane OR a new LiDAR mesh chunk
+    func renderer(_ renderer: SCNSceneRenderer, nodeFor anchor: ARAnchor) -> SCNNode? {
+        let node = SCNNode()
         
-        // Create a 3D flat surface
-        let plane = SCNPlane(width: CGFloat(planeAnchor.extent.x), height: CGFloat(planeAnchor.extent.z))
+        // 1. Handle Planes
+        if let planeAnchor = anchor as? ARPlaneAnchor {
+            // FIXED: iOS 16 planeExtent uses width and height
+            let plane = SCNPlane(width: CGFloat(planeAnchor.planeExtent.width), 
+                                 height: CGFloat(planeAnchor.planeExtent.height))
+            
+            let color = planeAnchor.alignment == .horizontal ? UIColor.blue : UIColor.orange
+            plane.materials.first?.diffuse.contents = color.withAlphaComponent(0.4)
+            
+            let planeNode = SCNNode(geometry: plane)
+            planeNode.position = SCNVector3(planeAnchor.center.x, 0, planeAnchor.center.z)
+            planeNode.eulerAngles.x = -.pi / 2
+            planeNode.name = "DebugPlane"
+            planeNode.isHidden = !settings.showDebugPlanes
+            
+            node.addChildNode(planeNode)
+        }
         
-        // Blue for floors, Orange for walls
-        let color = planeAnchor.alignment == .horizontal ? UIColor.blue : UIColor.orange
-        plane.materials.first?.diffuse.contents = color.withAlphaComponent(0.4) // Semi-transparent
+        // 2. Handle LiDAR Mesh Chunks
+        else if let meshAnchor = anchor as? ARMeshAnchor {
+            let geometry = SCNGeometry(arGeometry: meshAnchor.geometry)
+            
+            // Create a wireframe material
+            let material = SCNMaterial()
+            material.diffuse.contents = UIColor.cyan.withAlphaComponent(0.5)
+            material.fillMode = .lines // Draws the matrix-style wireframe
+            material.isDoubleSided = true
+            geometry.materials = [material]
+            
+            let meshNode = SCNNode(geometry: geometry)
+            meshNode.name = "DebugMesh"
+            meshNode.isHidden = !settings.showDebugMesh
+            
+            node.addChildNode(meshNode)
+        }
         
-        let planeNode = SCNNode(geometry: plane)
-        planeNode.position = SCNVector3(planeAnchor.center.x, 0, planeAnchor.center.z)
-        planeNode.eulerAngles.x = -.pi / 2 // Lay it flat against the surface
-        planeNode.name = "DebugPlane"
-        planeNode.isHidden = !settings.showDebugPlanes // Check user toggle
-        
-        node.addChildNode(planeNode)
+        return node
     }
 
-    // When ARKit refines the size of the plane
+    // When ARKit refines the size of an existing plane or mesh
     func renderer(_ renderer: SCNSceneRenderer, didUpdate node: SCNNode, for anchor: ARAnchor) {
-        guard let planeAnchor = anchor as? ARPlaneAnchor else { return }
-        guard let planeNode = node.childNodes.first(where: { $0.name == "DebugPlane" }) else { return }
-        guard let plane = planeNode.geometry as? SCNPlane else { return }
         
-        // Update size and position
-        plane.width = CGFloat(planeAnchor.extent.x)
-        plane.height = CGFloat(planeAnchor.extent.z)
-        planeNode.position = SCNVector3(planeAnchor.center.x, 0, planeAnchor.center.z)
-        planeNode.isHidden = !settings.showDebugPlanes
+        if let planeAnchor = anchor as? ARPlaneAnchor,
+           let planeNode = node.childNodes.first(where: { $0.name == "DebugPlane" }),
+           let plane = planeNode.geometry as? SCNPlane {
+            
+            // FIXED: iOS 16 planeExtent
+            plane.width = CGFloat(planeAnchor.planeExtent.width)
+            plane.height = CGFloat(planeAnchor.planeExtent.height)
+            planeNode.position = SCNVector3(planeAnchor.center.x, 0, planeAnchor.center.z)
+            planeNode.isHidden = !settings.showDebugPlanes
+        }
+        
+        else if let meshAnchor = anchor as? ARMeshAnchor,
+                let meshNode = node.childNodes.first(where: { $0.name == "DebugMesh" }) {
+            
+            // Replace the old mesh geometry with the newly refined one
+            let newGeometry = SCNGeometry(arGeometry: meshAnchor.geometry)
+            newGeometry.materials = meshNode.geometry?.materials ?? []
+            meshNode.geometry = newGeometry
+            meshNode.isHidden = !settings.showDebugMesh
+        }
+    }
+}
+
+// MARK: - ARMeshGeometry to SCNGeometry Bridge
+extension SCNGeometry {
+    convenience init(arGeometry: ARMeshGeometry) {
+        let verticesSource = SCNGeometrySource(buffer: arGeometry.vertices.buffer, 
+                                               vertexFormat: arGeometry.vertices.format, 
+                                               semantic: .vertex, 
+                                               vertexCount: arGeometry.vertices.count, 
+                                               dataOffset: arGeometry.vertices.offset, 
+                                               dataStride: arGeometry.vertices.stride)
+        
+        let facesElement = SCNGeometryElement(buffer: arGeometry.faces.buffer, 
+                                              primitiveType: .triangles, 
+                                              primitiveCount: arGeometry.faces.count, 
+                                              bytesPerIndex: arGeometry.faces.bytesPerIndex)
+        
+        self.init(sources: [verticesSource], elements: [facesElement])
     }
 }
 

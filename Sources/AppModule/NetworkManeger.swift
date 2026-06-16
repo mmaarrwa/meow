@@ -9,6 +9,7 @@ final class NetworkManager {
     private let portNumber: UInt16 = 5005
     private var connection: NWConnection?
     var onCommandReceived: ((String) -> Void)?
+    var onStateChanged: ((Bool) -> Void)?
 
     private init() {}
 
@@ -24,12 +25,14 @@ final class NetworkManager {
             switch state {
             case .ready:
                 print("✅ Connected to \(ipAddress):\(self?.portNumber ?? 0)")
+                self?.onStateChanged?(true)
                 // Handshake punch — tells laptop the iPhone's ephemeral port
                 self?.sendPose(["type": "handshake", "message": "iOS Ready"])
                 // Start listening for START/STOP commands
                 self?.receiveIncomingData()
             case .failed(let error):
                 print("❌ Connection failed: \(error)")
+                self?.onStateChanged?(false)
             default:
                 break
             }
@@ -41,7 +44,6 @@ final class NetworkManager {
     func stop() {
         connection?.cancel()
         connection = nil
-        onCommandReceived = nil
     }
 
     func sendPose(_ pose: [String: Any]) {
@@ -59,29 +61,20 @@ final class NetworkManager {
 
     // Listens continuously for START / STOP commands from laptop
     private func receiveIncomingData() {
-        connection?.receive(
-            minimumIncompleteLength: 1,
-            maximumLength: 65536
-        ) { [weak self] data, _, isComplete, error in
+        connection?.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] data, _, isComplete, error in
             guard let self = self else { return }
+            defer { self.receiveIncomingData() }
 
             if let error = error {
                 print("Receive error: \(error)")
                 return
             }
-
-            if let data = data,
-               !data.isEmpty,
-               let message = String(data: data, encoding: .utf8) {
+            if let data = data, !data.isEmpty,
+            let message = String(data: data, encoding: .utf8) {
                 DispatchQueue.main.async {
-                    self.onCommandReceived?(
-                        message.trimmingCharacters(in: .whitespacesAndNewlines)
-                    )
+                    self.onCommandReceived?(message.trimmingCharacters(in: .whitespacesAndNewlines))
                 }
             }
-
-            // Always re-arm so we never go deaf
-            self.receiveIncomingData()
         }
     }
 }
