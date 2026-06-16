@@ -250,6 +250,17 @@ struct SettingsSidebar: View {
                         }
                     }
 
+                    SettingsRow(label: "H-spread") {
+                        VStack(spacing: 2) {
+                            Slider(value: $settings.horizontalSpread,
+                                   in: 0.2...1.0, step: 0.05)
+                                .accentColor(.cyan)
+                            Text(String(format: "%.2f", settings.horizontalSpread))
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundColor(.cyan)
+                        }
+                    }
+
                     SettingsRow(label: "Max dist") {
                         Picker("", selection: $settings.maxRayDistance) {
                             Text("1m").tag(Float(1.0))

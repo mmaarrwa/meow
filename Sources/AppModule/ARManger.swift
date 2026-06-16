@@ -128,7 +128,7 @@ final class ARManager: NSObject, ObservableObject {
     private func buildConfig() -> ARWorldTrackingConfiguration {
         let config = ARWorldTrackingConfiguration()
         config.worldAlignment  = .gravity
-        config.planeDetection  = [.horizontal]
+        config.planeDetection  = [.horizontal, .vertical]
 
         let refImages = OriginMarkerManager.shared.referenceImages()
         if !refImages.isEmpty {
@@ -280,6 +280,7 @@ final class ARManager: NSObject, ObservableObject {
         let rows   = settings.numScanRows
         let vcOff  = Float(settings.verticalCenterOffset)
         let vSpread = Float(settings.verticalSpread)
+        let hSpread = Float(settings.horizontalSpread)
         let minD   = settings.minRayDistance
         let maxD   = settings.maxRayDistance
 
@@ -287,7 +288,7 @@ final class ARManager: NSObject, ObservableObject {
         var hitCount = 0
 
         for col in 0..<cols {
-            let nx = Float(col) / Float(cols - 1) * 2.0 - 1.0
+            let nx = (Float(col) / Float(cols - 1) * 2.0 - 1.0) * hSpread
             let px = max(0, min(Int((0.5 + nx * 0.5) * Float(w)), w - 1))
             var colMin = Float(10.0)
 
@@ -316,6 +317,7 @@ final class ARManager: NSObject, ObservableObject {
         let rows    = settings.numScanRows
         let vcOff   = settings.verticalCenterOffset
         let vSpread = settings.verticalSpread
+        let hSpread = CGFloat(settings.horizontalSpread)
         let minD    = settings.minRayDistance
         let maxD    = settings.maxRayDistance
         let camPos  = SIMD3<Float>(frame.camera.transform.columns.3.x,
@@ -326,7 +328,7 @@ final class ARManager: NSObject, ObservableObject {
         var hitCount = 0
 
         for col in 0..<cols {
-            let nx = CGFloat(col) / CGFloat(cols - 1) * 2.0 - 1.0
+            let nx = (CGFloat(col) / CGFloat(cols - 1) * 2.0 - 1.0) * hSpread
             var colMin = Float(10.0)
 
             for row in 0..<rows {
@@ -367,6 +369,7 @@ final class ARManager: NSObject, ObservableObject {
         let rows    = settings.numScanRows
         let vcOff   = settings.verticalCenterOffset
         let vSpread = settings.verticalSpread
+        let hSpread = CGFloat(settings.horizontalSpread)
         let minD    = settings.minRayDistance
         let maxD    = settings.maxRayDistance
         let camPos  = SIMD3<Float>(frame.camera.transform.columns.3.x,
@@ -377,7 +380,7 @@ final class ARManager: NSObject, ObservableObject {
         var hitCount = 0
 
         for col in 0..<cols {
-            let nx = CGFloat(col) / CGFloat(cols - 1) * 2.0 - 1.0
+            let nx = (CGFloat(col) / CGFloat(cols - 1) * 2.0 - 1.0) * hSpread
             var colMin = Float(10.0)
 
             for row in 0..<rows {

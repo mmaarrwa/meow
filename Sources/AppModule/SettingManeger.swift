@@ -32,6 +32,9 @@ final class SettingsManager: ObservableObject {
     @Published var verticalSpread: Double {
         didSet { UserDefaults.standard.set(verticalSpread, forKey: "verticalSpread") }
     }
+    @Published var horizontalSpread: Double {
+        didSet { UserDefaults.standard.set(horizontalSpread, forKey: "horizontalSpread") }
+    }
     @Published var maxRayDistance: Float {
         didSet { UserDefaults.standard.set(maxRayDistance, forKey: "maxRayDistance") }
     }
@@ -63,6 +66,8 @@ final class SettingsManager: ObservableObject {
                                 .nonZero ?? 3
         verticalCenterOffset = UserDefaults.standard.double(forKey: "verticalCenterOffset")
                                 .nonZero ?? 0.65
+        horizontalSpread     = UserDefaults.standard.double(forKey: "horizontalSpread")
+                                .nonZero ?? 0.80
         verticalSpread       = UserDefaults.standard.double(forKey: "verticalSpread")
                                 .nonZero ?? 0.20
         maxRayDistance       = UserDefaults.standard.float(forKey: "maxRayDistance")
