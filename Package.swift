@@ -20,6 +20,7 @@ let package = Package(
                 // Download from: https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n.mlpackage.zip
                 // Place it at: Sources/AppModule/yolov8n.mlpackage
                 .process("AppModule/yolov8n.mlpackage"),
+                .process("AppModule/DepthAnythingV2SmallF16.mlpackage"),
                 .process("AppModule/origin_marker.png") // See setup instructions in OriginManager.swift
             ]
         )
