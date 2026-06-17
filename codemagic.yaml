@@ -31,7 +31,13 @@ workflows:
           cp "$BINARY_SOURCE" "$APP_BUNDLE/meow"
 
           # 2. Find and copy the compiled CoreML models
-          find "$CM_BUILD_DIR/SurveyorApp.xcarchive" -name "*.mlmodelc" -type d -exec cp -r {} "$APP_BUNDLE/" \;
+          find "$CM_BUILD_DIR/meow.xcarchive" -name "*.mlmodelc" -type d -exec cp -r {} "$APP_BUNDLE/" \;
+          MODEL_COUNT=$(find "$APP_BUNDLE" -maxdepth 1 -name "*.mlmodelc" -type d | wc -l)
+          echo "Copied $MODEL_COUNT compiled model(s) into the app bundle."
+          if [ "$MODEL_COUNT" -lt 2 ]; then
+            echo "Error: expected 2 models (yolov8n + DepthAnythingV2SmallF16), found $MODEL_COUNT!"
+            exit 1
+          fi
 
           # 3. Copy Info.plist
           cp "$CM_BUILD_DIR/Info.plist" "$APP_BUNDLE/Info.plist"
