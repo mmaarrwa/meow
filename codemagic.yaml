@@ -30,14 +30,8 @@ workflows:
           echo "Found binary: $BINARY_SOURCE"
           cp "$BINARY_SOURCE" "$APP_BUNDLE/meow"
 
-          # 2. Find and copy the compiled CoreML model
-          MLMODEL_SOURCE=$(find "$CM_BUILD_DIR/meow.xcarchive" -name "yolov8n.mlmodelc" -type d | head -n 1)
-          if [ -z "$MLMODEL_SOURCE" ]; then
-            echo "Warning: Could not find compiled yolov8n.mlmodelc — detection will not run!"
-          else
-            echo "Found ML model: $MLMODEL_SOURCE"
-            cp -r "$MLMODEL_SOURCE" "$APP_BUNDLE/"
-          fi
+          # 2. Find and copy the compiled CoreML models
+          find "$CM_BUILD_DIR/SurveyorApp.xcarchive" -name "*.mlmodelc" -type d -exec cp -r {} "$APP_BUNDLE/" \;
 
           # 3. Copy Info.plist
           cp "$CM_BUILD_DIR/Info.plist" "$APP_BUNDLE/Info.plist"
