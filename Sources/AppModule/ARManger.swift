@@ -42,6 +42,8 @@ final class ARManager: NSObject, ObservableObject {
     private var smoothedScan: [Float] = []
     private var missCounters: [Int] = []
 
+    private var hasRunDepthSmokeTest = false
+
     // MARK: - Init
     override init() {
         super.init()
@@ -68,6 +70,10 @@ final class ARManager: NSObject, ObservableObject {
             guard let self = self else { return }
             self.originData      = data
             self.isOriginVisible = OriginMarkerManager.shared.isVisible
+        }
+
+        DepthEstimator.shared.onDebugLog = { [weak self] msg in
+            self?.network.sendLog(msg)
         }
 
         network.onCommandReceived = { [weak self] command in
@@ -204,6 +210,13 @@ final class ARManager: NSObject, ObservableObject {
 
         // Update tracking status
         isTracking = frame.camera.trackingState == .normal
+
+        
+        // inside tick(), anywhere after `frame` is unwrapped:
+        if !hasRunDepthSmokeTest {
+            hasRunDepthSmokeTest = true
+            DepthEstimator.shared.runSmokeTest(on: frame.capturedImage)
+        }
 
         // ── System B: Laser Scan ────────────────────────────────────
         let (scanArray, confidence, scanMethod) = getLaserScan(frame: frame)
@@ -444,7 +457,7 @@ final class ARManager: NSObject, ObservableObject {
                                                        .estimatedHorizontalPlane]).first {
                     // --- DEBUG ADDITION START ---
                     // Draw a tiny red dot where the HitTest found a feature point
-                    let debugNode = SCNNode(geometry: SCNSphere(radius: 0.02))
+                    /*let debugNode = SCNNode(geometry: SCNSphere(radius: 0.02))
                     debugNode.geometry?.firstMaterial?.diffuse.contents = UIColor.red
                     debugNode.position = SCNVector3(hit.worldTransform.columns.3.x,
                                                     hit.worldTransform.columns.3.y,
@@ -455,7 +468,7 @@ final class ARManager: NSObject, ObservableObject {
                     // Remove the dot after 0.1 seconds so the screen doesn't fill up
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                         debugNode.removeFromParentNode()
-                    }
+                    }*/
                     // --- DEBUG ADDITION END ---
                     
                     let hp = SIMD3<Float>(hit.worldTransform.columns.3.x,
