@@ -442,6 +442,22 @@ final class ARManager: NSObject, ObservableObject {
                 if let hit = view.hitTest(pt, types: [.featurePoint,
                                                        .existingPlaneUsingExtent,
                                                        .estimatedHorizontalPlane]).first {
+                    // --- DEBUG ADDITION START ---
+                    // Draw a tiny red dot where the HitTest found a feature point
+                    let debugNode = SCNNode(geometry: SCNSphere(radius: 0.02))
+                    debugNode.geometry?.firstMaterial?.diffuse.contents = UIColor.red
+                    debugNode.position = SCNVector3(hit.worldTransform.columns.3.x,
+                                                    hit.worldTransform.columns.3.y,
+                                                    hit.worldTransform.columns.3.z)
+                    debugNode.name = "DebugHitPoint"
+                    view.scene.rootNode.addChildNode(debugNode)
+                    
+                    // Remove the dot after 0.1 seconds so the screen doesn't fill up
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        debugNode.removeFromParentNode()
+                    }
+                    // --- DEBUG ADDITION END ---
+                    
                     let hp = SIMD3<Float>(hit.worldTransform.columns.3.x,
                                           hit.worldTransform.columns.3.y,
                                           hit.worldTransform.columns.3.z)
