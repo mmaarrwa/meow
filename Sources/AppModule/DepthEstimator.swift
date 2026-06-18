@@ -2,6 +2,7 @@ import Foundation
 import CoreML
 import CoreImage
 import CoreVideo
+import UIKit
 
 final class DepthEstimator {
     static let shared = DepthEstimator()
@@ -12,9 +13,15 @@ final class DepthEstimator {
     private let ciContext = CIContext()
     private let inputWidth = 518
     private let inputHeight = 392
+    
+    // 1. Your brilliant Semaphore Lock to prevent memory crashes!
+    private var isRunning = false
 
     private init() {
-        loadModel()
+        // 2. Your brilliant background loader so the app opens instantly!
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            self?.loadModel()
+        }
     }
 
     private func loadModel() {
@@ -23,7 +30,10 @@ final class DepthEstimator {
             return
         }
         do {
-            model = try MLModel(contentsOf: modelURL)
+            // Bypasses the Neural Engine freeze
+            let config = MLModelConfiguration()
+            config.computeUnits = .cpuAndGPU
+            model = try MLModel(contentsOf: modelURL, configuration: config)
             onDebugLog?("✅ Depth model loaded")
         } catch {
             onDebugLog?("❌ Depth model failed to load: \(error)")
@@ -31,8 +41,15 @@ final class DepthEstimator {
     }
 
     func runSmokeTest(on sourcePixelBuffer: CVPixelBuffer) {
+        // 3. The lock in action: If the GPU is busy, silently drop the frame and wait for the next one.
+        guard !isRunning else { return }
+        isRunning = true
+        
+        // Ensure the lock is ALWAYS released when this function finishes, even if it crashes
+        defer { isRunning = false }
+
         guard let model = model else {
-            onDebugLog?("❌ Depth model not loaded")
+            // Silently return instead of spamming "not loaded" while the background thread is still loading
             return
         }
 
@@ -60,13 +77,19 @@ final class DepthEstimator {
             let w = CVPixelBufferGetWidth(depthBuffer)
             let h = CVPixelBufferGetHeight(depthBuffer)
             let rowBytes = CVPixelBufferGetBytesPerRow(depthBuffer)
+            
             if let base = CVPixelBufferGetBaseAddress(depthBuffer) {
                 let centerRow = h / 2
                 let centerCol = w / 2
                 let elementsPerRow = rowBytes / MemoryLayout<Float16>.stride  // accounts for any row padding
                 let ptr = base.assumingMemoryBound(to: Float16.self)
                 let centerValue = ptr[centerRow * elementsPerRow + centerCol]
+                
+                // We print the raw AI value to prove the plumbing works!
                 onDebugLog?("✅ Depth ran in \(String(format: "%.1f", elapsedMs))ms — center value: \(Float(centerValue))")
+            } else {
+                // If iOS blocks memory access, this will tell us!
+                onDebugLog?("❌ Could not read pixel buffer memory!")
             }
             CVPixelBufferUnlockBaseAddress(depthBuffer, .readOnly)
 

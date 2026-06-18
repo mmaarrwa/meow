@@ -42,7 +42,8 @@ final class ARManager: NSObject, ObservableObject {
     private var smoothedScan: [Float] = []
     private var missCounters: [Int] = []
 
-    private var hasRunDepthSmokeTest = false
+    //private var hasRunDepthSmokeTest = false
+    private var depthTickCounter = 0
 
     // MARK: - Init
     override init() {
@@ -211,11 +212,14 @@ final class ARManager: NSObject, ObservableObject {
         // Update tracking status
         isTracking = frame.camera.trackingState == .normal
 
-        
-        // inside tick(), anywhere after `frame` is unwrapped:
-        if !hasRunDepthSmokeTest {
-            hasRunDepthSmokeTest = true
-            DepthEstimator.shared.runSmokeTest(on: frame.capturedImage)
+        depthTickCounter += 1
+
+        // Run the depth model once every 10 ticks (exactly once per second)
+        if depthTickCounter % 10 == 0 {
+            // Push to background thread to protect the UDP socket
+            DispatchQueue.global(qos: .userInitiated).async {
+                DepthEstimator.shared.runSmokeTest(on: frame.capturedImage)
+            }
         }
 
         // ── System B: Laser Scan ────────────────────────────────────
