@@ -12,7 +12,7 @@ final class DepthEstimator {
 
     private var model: MLModel?
     private let ciContext = CIContext()
-    private let inputWidth  = 512
+    private let inputWidth  = 518 //fix 518 not 512 ya bakra
     private let inputHeight = 392
 
     // Busy-guard: if GPU is mid-inference, drop the frame silently
