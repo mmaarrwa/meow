@@ -206,8 +206,12 @@ final class ARManager: NSObject, ObservableObject {
                     if let result = DepthEstimator.shared.generateVirtualLiDAR(
                             on: frame.capturedImage, frame: frame) {
                         DispatchQueue.main.async {
-                            self.latestVirtualScan = result.scan
-                            self.depthMapImage     = result.image
+                            // Only update laser scan when calibration is valid
+                            if let scan = result.scan {
+                                self.latestVirtualScan = scan   
+                            }
+                            // Always update visualizer
+                            self.depthMapImage = result.image   
                         }
                     }
                 }

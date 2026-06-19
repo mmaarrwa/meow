@@ -12,14 +12,13 @@ final class DepthEstimator {
 
     private var model: MLModel?
     private let ciContext = CIContext()
-    private let inputWidth  = 392  // Down from 518 to save GPU heat
-    private let inputHeight = 294  // Down from 392 to save GPU heat
+    private let inputWidth  = 392
+    private let inputHeight = 294
 
     // Busy-guard: if GPU is mid-inference, drop the frame silently
     private var isRunning = false
 
     // Cache: latest depth buffer + calibration — read by sampleMetricDepth()
-    // so DetectionManager can look up per-object depth without re-running inference
     private var cachedDepthBuffer:  CVPixelBuffer?            = nil
     private var cachedCalibration:  (a: Float, b: Float)      = (0.001, 0.0)
 
@@ -38,7 +37,7 @@ final class DepthEstimator {
         }
         do {
             let config = MLModelConfiguration()
-            config.computeUnits = .cpuAndGPU   // bypasses Neural Engine freeze
+            config.computeUnits = .cpuAndGPU   
             model = try MLModel(contentsOf: modelURL, configuration: config)
             onDebugLog?("✅ Depth model loaded")
         } catch {
@@ -73,20 +72,15 @@ final class DepthEstimator {
     }
 
     // MARK: - Virtual LiDAR Generator
-    // Returns (scan: 30-column distance array, image: normalised depth visualisation)
-    // or nil if busy or model not ready yet.
     func generateVirtualLiDAR(on sourcePixelBuffer: CVPixelBuffer,
-                               frame: ARFrame) -> (scan: [Float], image: UIImage)? {
+                               frame: ARFrame) -> (scan: [Float]?, image: UIImage)? {
 
         guard !isRunning else { return nil }
-        
-        // --- NEW: Thermal Circuit Breaker ---
         let thermalState = ProcessInfo.processInfo.thermalState
         if thermalState == .critical {
             onDebugLog?("🔥 Thermal critical — pausing depth inference")
             return nil
         }
-        // ------------------------------------
         
         isRunning = true
         defer { isRunning = false }
@@ -120,13 +114,15 @@ final class DepthEstimator {
 
             // ── 1. DYNAMIC CALIBRATION (Least-Squares in disparity space) ────────
             let pitch        = frame.camera.eulerAngles.x
-            let cameraHeight = frame.camera.transform.columns.3.y
+            // FIX 1: Use the physical mounting height from Settings, not ARKit's 0.0 origin!
+            let cameraHeight = Float(SettingsManager.shared.cameraHeight)
             let verticalFOV: Float = 60.0 * .pi / 180.0
 
             var aiValues:        [Float] = []
             var trueDisparities: [Float] = []
 
-            if pitch < -0.1 && cameraHeight > 0.1 {
+            // FIX 2: Check physical height, but allow flat-mounted phones to calibrate
+            if cameraHeight > 0.1 {
                 let samplePercents: [Float] = [0.75, 0.80, 0.85, 0.90, 0.95]
                 let anchorCol = w / 2
                 for percent in samplePercents {
@@ -134,6 +130,8 @@ final class DepthEstimator {
                     let aiValue          = Float(ptr[anchorRow * elementsPerRow + anchorCol])
                     let rayPitchOffset   = (percent - 0.5) * verticalFOV
                     let absoluteRayPitch = pitch - rayPitchOffset
+                    
+                    // If this specific ray hits the floor, calibrate!
                     if absoluteRayPitch < -0.05 && aiValue > 0 {
                         let trueDepth     = abs(cameraHeight / sin(absoluteRayPitch))
                         let trueDisparity = 1.0 / trueDepth
@@ -143,62 +141,63 @@ final class DepthEstimator {
                 }
             }
 
-            var a: Float = 0.001
-            var b: Float = 0.0
-            if aiValues.count >= 3,
-               let fit = leastSquaresFit(x: aiValues, y: trueDisparities) {
-                a = fit.a
-                b = fit.b
-            }
+            var calibratedScan: [Float]? = nil
 
-            // ── Cache for DetectionManager.sampleMetricDepth() ───────────────────
-            cachedDepthBuffer = depthBuffer
-            cachedCalibration = (a, b)
+            if aiValues.count >= 3, let fit = leastSquaresFit(x: aiValues, y: trueDisparities) {
+                let a = fit.a
+                let b = fit.b
 
-            // ── 2. BUILD 30-COLUMN VIRTUAL LASER SCAN ────────────────────────────
-            let settings = SettingsManager.shared
-            let cols     = settings.numScanColumns
-            let rows     = settings.numScanRows
-            let vcOff    = Float(settings.verticalCenterOffset)
-            let vSpread  = Float(settings.verticalSpread)
-            let hSpread  = Float(settings.horizontalSpread)
-            let minD     = settings.minRayDistance
-            let maxD     = settings.maxRayDistance
+                // ── Cache for DetectionManager.sampleMetricDepth() ───────────────────
+                if cachedDepthBuffer == nil {  // first time only
+                    onDebugLog?("🎯 First successful depth calibration: a=\(a), b=\(b)")
+                }
+                cachedDepthBuffer = depthBuffer
+                cachedCalibration = (a, b)
 
-            var virtualScan = Array(repeating: Float(10.0), count: cols)
-            var hitCount    = 0
+                // ── 2. BUILD 30-COLUMN VIRTUAL LASER SCAN ────────────────────────────
+                let settings = SettingsManager.shared
+                let cols     = settings.numScanColumns
+                let rows     = settings.numScanRows
+                let vcOff    = Float(settings.verticalCenterOffset)
+                let vSpread  = Float(settings.verticalSpread)
+                let hSpread  = Float(settings.horizontalSpread)
+                let minD     = settings.minRayDistance
+                let maxD     = settings.maxRayDistance
 
-            for col in 0..<cols {
-                let nx     = (Float(col) / Float(cols - 1) * 2.0 - 1.0) * hSpread
-                let px     = max(0, min(Int((0.5 + nx * 0.5) * Float(w)), w - 1))
-                var colMin = Float(10.0)
+                var virtualScan = Array(repeating: Float(10.0), count: cols)
 
-                for row in 0..<rows {
-                    let ny    = Float(row) / Float(max(1, rows - 1)) * 2.0 - 1.0
-                    let normY = vcOff + ny * vSpread
-                    let py    = max(0, min(Int(normY * Float(h)), h - 1))
-                    let aiValue = Float(ptr[py * elementsPerRow + px])
-                    if aiValue > 0 {
-                        let calibratedDisparity = (a * aiValue) + b
-                        if calibratedDisparity > 0 {
-                            let trueDepth = 1.0 / calibratedDisparity
-                            if trueDepth >= minD && trueDepth <= maxD {
-                                colMin = min(colMin, trueDepth)
-                                hitCount += 1
+                for col in 0..<cols {
+                    let nx     = (Float(col) / Float(cols - 1) * 2.0 - 1.0) * hSpread
+                    let px     = max(0, min(Int((0.5 + nx * 0.5) * Float(w)), w - 1))
+                    var colMin = Float(10.0)
+
+                    for row in 0..<rows {
+                        let ny    = Float(row) / Float(max(1, rows - 1)) * 2.0 - 1.0
+                        let normY = vcOff + ny * vSpread
+                        let py    = max(0, min(Int(normY * Float(h)), h - 1))
+                        let aiValue = Float(ptr[py * elementsPerRow + px])
+                        if aiValue > 0 {
+                            let calibratedDisparity = (a * aiValue) + b
+                            if calibratedDisparity > 0 {
+                                let trueDepth = 1.0 / calibratedDisparity
+                                if trueDepth >= minD && trueDepth <= maxD {
+                                    colMin = min(colMin, trueDepth)
+                                }
                             }
                         }
                     }
+                    virtualScan[col] = colMin
                 }
-                virtualScan[col] = colMin
+                
+                // Calibration succeeded, safe to populate the scan array
+                calibratedScan = virtualScan
             }
 
-            guard hitCount > 0 else { return nil }
-
-            // ── 3. VISUALISATION ────────────────────────────────────────────────
+            // ── 3. VISUALISATION (ALWAYS RUNS) ──────────────────────────────────
             let depthImage = normaliseDepthToImage(
                 ptr: ptr, w: w, h: h, elementsPerRow: elementsPerRow)
 
-            return (virtualScan, depthImage)
+            return (calibratedScan, depthImage)
 
         } catch {
             onDebugLog?("❌ Virtual LiDAR failed: \(error)")
@@ -241,7 +240,6 @@ final class DepthEstimator {
                 bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
               let cgImage = ctx.makeImage() else { return UIImage() }
 
-        // FIXED BUG: Changed .right to .up so the image isn't rotated sideways!
         return UIImage(cgImage: cgImage, scale: 1.0, orientation: .up)
     }
 
