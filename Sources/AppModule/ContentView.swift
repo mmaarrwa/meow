@@ -56,6 +56,22 @@ struct ContentView: View {
                                 data:         arManager.originData)
 
                 Spacer()
+                
+                // ── AI DEPTH MAP VISUALIZER (PICTURE-IN-PICTURE) ──
+                HStack {
+                    Spacer() // Pushes the image to the right side
+                    if let depthImage = arManager.depthMapImage {
+                        Image(uiImage: depthImage)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 140) // Adjust minimap size here
+                            .border(Color.cyan.opacity(0.8), width: 2)
+                            .shadow(color: .black.opacity(0.8), radius: 4, x: 0, y: 2)
+                            .padding(.trailing, 20)
+                            .padding(.bottom, 15)
+                    }
+                }
+                // ──────────────────────────────────────────────────
 
                 // Bottom control panel
                 VStack(spacing: 10) {

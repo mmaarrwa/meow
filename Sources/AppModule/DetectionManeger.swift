@@ -11,13 +11,13 @@ struct DetectedObject: Identifiable {
     let confidence: Float
     let normalizedRect: CGRect      // Vision normalised rect (bottom-left origin)
     let distanceMeters: Float
-    let distanceMethod: String      // M1–M5
+    let distanceMethod: String      // M1–M5, MDepth
     let worldPosition: SIMD3<Float> // World-space XYZ (ARKit world frame)
 }
 
 // MARK: - DetectionManager
 // Runs YOLOv8 inference and computes per-detection world position using
-// a 5-stage cascade. World position is always in the ARKit world frame
+// a 6-stage cascade. World position is always in the ARKit world frame
 // (origin = where START was pressed).
 
 final class DetectionManager {
@@ -123,7 +123,14 @@ final class DetectionManager {
         }
     }
 
-    // MARK: - 5-Stage Distance + World Position Cascade
+    // MARK: - 6-Stage Distance + World Position Cascade
+    // Priority order:
+    //   M1     — LiDAR depth map              (iPhone 12 Pro only)
+    //   MDepth — Depth model sample            (all phones, uses cached inference)
+    //   M2     — ARKit raycast                 (planar surfaces)
+    //   M3     — Legacy hitTest                (feature points + planes)
+    //   M4     — Feature point density cone    (sparse fallback)
+    //   M5     — Geometric ray–ground          (always available, last resort)
 
     private func computeDistance(
         boundingBox     bbox:            CGRect,
@@ -141,33 +148,40 @@ final class DetectionManager {
                                    cameraTransform.columns.3.y,
                                    cameraTransform.columns.3.z)
 
-        // ── M1: LiDAR ───────────────────────────────────────────────
+        // ── M1: LiDAR ───────────────────────────────────────────────────────────
         if let (d, wp) = m1_lidar(frame: frame, normX: normX, normY: normY,
                                    camPos: camPos, camTransform: cameraTransform,
                                    intrinsics: intrinsics) {
             return (clamp(d), "M1", wp)
         }
 
-        // ── M2: ARKit raycast ────────────────────────────────────────
+        // ── MDepth: Depth model (cached result from DepthEstimator) ─────────────
+        if let (d, wp) = mDepth_model(bbox: bbox, normX: normX, normY: normY,
+                                       camPos: camPos, cameraTransform: cameraTransform,
+                                       intrinsics: intrinsics, imageSize: imageSize) {
+            return (clamp(d), "MDepth", wp)
+        }
+
+        // ── M2: ARKit raycast ────────────────────────────────────────────────────
         if let (d, wp) = m2_raycast(frame: frame, normX: normX, normY: normY,
                                      camPos: camPos) {
             return (clamp(d), "M2", wp)
         }
 
-        // ── M3: Legacy hitTest ───────────────────────────────────────
+        // ── M3: Legacy hitTest ───────────────────────────────────────────────────
         if let (d, wp) = m3_hitTest(normX: normX, normY: normY, camPos: camPos,
                                      cameraTransform: cameraTransform) {
             return (clamp(d), "M3", wp)
         }
 
-        // ── M4: Feature point density ────────────────────────────────
+        // ── M4: Feature point density ────────────────────────────────────────────
         if let (d, wp) = m4_featurePoints(frame: frame, bbox: bbox,
                                            camPos: camPos,
                                            cameraTransform: cameraTransform) {
             return (clamp(d), "M4", wp)
         }
 
-        // ── M5: Geometric ray–ground intersection ────────────────────
+        // ── M5: Geometric ray–ground intersection ────────────────────────────────
         let (d, wp) = m5_geometric(bbox: bbox, imageSize: imageSize,
                                     intrinsics: intrinsics,
                                     cameraTransform: cameraTransform)
@@ -208,6 +222,57 @@ final class DetectionManager {
         let worldPt = camTransform * localPt
         let wp = SIMD3<Float>(worldPt.x, worldPt.y, worldPt.z)
         return (simd_length(wp - camPos), wp)
+    }
+
+    // MARK: - MDepth: Depth Model (reads cached result from DepthEstimator)
+    // normX/normY are bbox-center in top-left-origin normalised coords —
+    // the same axes the depth buffer uses — so no extra remapping is needed.
+    // Back-projection follows the same ray approach as M5 but uses the
+    // model-derived metric depth as the parametric distance along the ray,
+    // which keeps the world position consistent with the distance value.
+    private func mDepth_model(bbox: CGRect,
+                               normX: Float, normY: Float,
+                               camPos: SIMD3<Float>,
+                               cameraTransform: simd_float4x4,
+                               intrinsics: simd_float3x3,
+                               imageSize: CGSize) -> (Float, SIMD3<Float>)? {
+
+        // Ask DepthEstimator for the calibrated metric depth at the bbox centre.
+        // Returns nil if no inference has completed yet (model still loading,
+        // or the first frame hasn't been processed).
+        guard let depthMeters = DepthEstimator.shared.sampleMetricDepth(
+                                        normX: normX, normY: normY),
+              depthMeters >= settings.minRayDistance,
+              depthMeters <= settings.maxRayDistance else { return nil }
+
+        // Unproject bbox centre through camera intrinsics to get a world-space ray
+        let fx = intrinsics.columns.0.x; let fy = intrinsics.columns.1.y
+        let cx = intrinsics.columns.2.x; let cy = intrinsics.columns.2.y
+        let ub = normX * Float(imageSize.width)
+        let vb = normY * Float(imageSize.height)
+        let rayCamera = simd_normalize(simd_float3(
+            (ub - cx) / fx,
+            (vb - cy) / fy,
+            -1.0
+        ))
+
+        // Rotate ray into world frame using the camera rotation (no translation)
+        let R = simd_float3x3(
+            SIMD3<Float>(cameraTransform.columns.0.x,
+                         cameraTransform.columns.0.y,
+                         cameraTransform.columns.0.z),
+            SIMD3<Float>(cameraTransform.columns.1.x,
+                         cameraTransform.columns.1.y,
+                         cameraTransform.columns.1.z),
+            SIMD3<Float>(cameraTransform.columns.2.x,
+                         cameraTransform.columns.2.y,
+                         cameraTransform.columns.2.z)
+        )
+        let rayWorld = simd_normalize(R * rayCamera)
+
+        // World position = camera origin + depth × ray direction
+        let wp = camPos + depthMeters * rayWorld
+        return (depthMeters, wp)
     }
 
     // MARK: - M2: ARKit raycast
@@ -304,7 +369,6 @@ final class DetectionManager {
             let local = simd_mul(worldToCam, simd_float4(p.x, p.y, p.z, 1))
             let absZ  = -local.z
             guard absZ > fpNearZ && absZ < fpFarZ else { continue }
-            // Add the offset check here if you want to ignore high points (like ceilings)
             guard local.y > -0.55 && local.y < -0.05 else { continue }
             guard abs(local.x / absZ) <= coneW,
                   abs(local.y / absZ) <= coneH else { continue }
@@ -329,8 +393,9 @@ final class DetectionManager {
         let fx = intrinsics.columns.0.x; let fy = intrinsics.columns.1.y
         let cx = intrinsics.columns.2.x; let cy = intrinsics.columns.2.y
 
+        // Bottom-centre pixel: ground contact point under the bounding box
         let ubNorm = Float(bbox.midX)
-        let vbNorm = Float(1.0 - bbox.minY)
+        let vbNorm = Float(1.0 - bbox.minY)   // bbox.minY = bottom in Vision coords
         let ub = ubNorm * Float(imageSize.width)
         let vb = vbNorm * Float(imageSize.height)
 
