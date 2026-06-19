@@ -12,8 +12,8 @@ final class DepthEstimator {
 
     private var model: MLModel?
     private let ciContext = CIContext()
-    private let inputWidth  = 518
-    private let inputHeight = 392
+    private let inputWidth  = 392  // Down from 518 to save GPU heat
+    private let inputHeight = 294  // Down from 392 to save GPU heat
 
     // Busy-guard: if GPU is mid-inference, drop the frame silently
     private var isRunning = false
@@ -47,10 +47,6 @@ final class DepthEstimator {
     }
 
     // MARK: - Public: Sample Metric Depth at a Normalised Screen Coordinate
-    // normX: 0=left,  1=right   (same direction as Vision bbox.midX)
-    // normY: 0=top,   1=bottom  (top-left origin — i.e. 1.0 - Vision Y)
-    // Called by DetectionManager.mDepth_model for per-object distance.
-    // Returns nil if no inference has completed yet.
     func sampleMetricDepth(normX: Float, normY: Float) -> Float? {
         guard let buffer = cachedDepthBuffer else { return nil }
 
@@ -83,6 +79,15 @@ final class DepthEstimator {
                                frame: ARFrame) -> (scan: [Float], image: UIImage)? {
 
         guard !isRunning else { return nil }
+        
+        // --- NEW: Thermal Circuit Breaker ---
+        let thermalState = ProcessInfo.processInfo.thermalState
+        if thermalState == .critical {
+            onDebugLog?("🔥 Thermal critical — pausing depth inference")
+            return nil
+        }
+        // ------------------------------------
+        
         isRunning = true
         defer { isRunning = false }
 
@@ -147,8 +152,6 @@ final class DepthEstimator {
             }
 
             // ── Cache for DetectionManager.sampleMetricDepth() ───────────────────
-            // CVPixelBuffer reference is retained; locking separately when reading
-            // is safe because CVPixelBuffer lock/unlock is reference-counted.
             cachedDepthBuffer = depthBuffer
             cachedCalibration = (a, b)
 
@@ -191,10 +194,7 @@ final class DepthEstimator {
 
             guard hitCount > 0 else { return nil }
 
-            // ── 3. VISUALISATION: normalise Float16 → grayscale UIImage ──────────
-            // CIImage cannot auto-display a Float16 single-channel buffer,
-            // so we normalise values to 0–255 RGBA explicitly.
-            // Brighter = larger raw AI value = typically CLOSER (disparity space).
+            // ── 3. VISUALISATION ────────────────────────────────────────────────
             let depthImage = normaliseDepthToImage(
                 ptr: ptr, w: w, h: h, elementsPerRow: elementsPerRow)
 
@@ -207,12 +207,9 @@ final class DepthEstimator {
     }
 
     // MARK: - Depth Visualisation Helper
-    // Normalises the raw Float16 disparity map to a grayscale UIImage.
-    // Bright = high disparity = close. Dark = low disparity = far.
     private func normaliseDepthToImage(ptr: UnsafePointer<Float16>,
                                         w: Int, h: Int,
                                         elementsPerRow: Int) -> UIImage {
-        // 1. Find min and max across the whole buffer for normalisation
         var minVal: Float =  Float.greatestFiniteMagnitude
         var maxVal: Float = -Float.greatestFiniteMagnitude
         for row in 0..<h {
@@ -224,7 +221,6 @@ final class DepthEstimator {
         let range = maxVal - minVal
         guard range > 0 else { return UIImage() }
 
-        // 2. Write normalised values into a RGBA byte array
         var pixels = [UInt8](repeating: 255, count: w * h * 4)
         for row in 0..<h {
             for col in 0..<w {
@@ -234,11 +230,9 @@ final class DepthEstimator {
                 pixels[idx]     = norm   // R
                 pixels[idx + 1] = norm   // G
                 pixels[idx + 2] = norm   // B
-                // pixels[idx + 3] = 255 already set
             }
         }
 
-        // 3. Wrap in a CGImage → UIImage
         let colorSpace = CGColorSpaceCreateDeviceRGB()
         guard let ctx = CGContext(
                 data: &pixels, width: w, height: h,
@@ -247,11 +241,10 @@ final class DepthEstimator {
                 bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
               let cgImage = ctx.makeImage() else { return UIImage() }
 
-        // .right orients the depth map to match portrait display
-        return UIImage(cgImage: cgImage, scale: 1.0, orientation: .right)
+        // FIXED BUG: Changed .right to .up so the image isn't rotated sideways!
+        return UIImage(cgImage: cgImage, scale: 1.0, orientation: .up)
     }
 
-    // MARK: - Least-Squares Helper
     private func leastSquaresFit(x: [Float], y: [Float]) -> (a: Float, b: Float)? {
         let n = Float(x.count)
         guard n > 1 else { return nil }
@@ -266,18 +259,16 @@ final class DepthEstimator {
         return (a, b)
     }
 
-    // MARK: - Pixel Buffer Resize Helper
-    private func resizedPixelBuffer(from ciImage: CIImage,
-                                    width: Int,
-                                    height: Int) -> CVPixelBuffer? {
+    private func resizedPixelBuffer(from ciImage: CIImage, width: Int, height: Int) -> CVPixelBuffer? {
         var pixelBuffer: CVPixelBuffer?
         let attrs: [CFString: Any] = [
-            kCVPixelBufferCGImageCompatibilityKey:         true,
+            kCVPixelBufferCGImageCompatibilityKey:        true,
             kCVPixelBufferCGBitmapContextCompatibilityKey: true
         ]
         CVPixelBufferCreate(kCFAllocatorDefault, width, height,
                             kCVPixelFormatType_32BGRA,
-                            attrs as CFDictionary, &pixelBuffer)
+                            attrs as CFDictionary,
+                            &pixelBuffer)
         guard let buffer = pixelBuffer else { return nil }
         let scaleX = CGFloat(width)  / ciImage.extent.width
         let scaleY = CGFloat(height) / ciImage.extent.height

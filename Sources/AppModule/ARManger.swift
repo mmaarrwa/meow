@@ -9,14 +9,14 @@ final class ARManager: NSObject, ObservableObject {
     static let shared = ARManager()
 
     // MARK: - Published State
-    @Published var isTracking:        Bool      = false
-    @Published var isStreaming:       Bool      = false
+    @Published var isTracking:        Bool  = false
+    @Published var isStreaming:       Bool  = false
     @Published var currentDetections: [DetectedObject] = []
-    @Published var lastImageSize:     CGSize    = CGSize(width: 1920, height: 1440)
-    @Published var isOriginVisible:   Bool      = false
+    @Published var lastImageSize:     CGSize = CGSize(width: 1920, height: 1440)
+    @Published var isOriginVisible:   Bool  = false
     @Published var originData:        OriginMarkerData? = nil
-    @Published var isConnected:       Bool      = false
-    @Published var depthMapImage:     UIImage?  = nil   // feeds depth visualiser in UI
+    @Published var isConnected:       Bool  = false
+    @Published var depthMapImage:     UIImage?  = nil
 
     // MARK: - AR Scene View
     let sceneView: ARSCNView = {
@@ -32,36 +32,38 @@ final class ARManager: NSObject, ObservableObject {
     private let settings = SettingsManager.shared
     private var scanTimer: Timer?
 
-    // MARK: - Combine
     private var cancellables = Set<AnyCancellable>()
 
-    // Detection smoothing
     private var detectionHistory: [[DetectedObject]] = []
     private let historyLength = 2
 
-    // Laser scan smoothing — sized dynamically from settings
     private var smoothedScan: [Float] = []
     private var missCounters: [Int]   = []
 
-    // Latest result from the depth model (updated async, read each tick)
     private var latestVirtualScan: [Float]? = nil
 
-    // True on devices without LiDAR — checked once, used every tick
     private let needsVirtualLiDAR: Bool =
         !ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh)
+
+    // ── THROTTLE VARIABLES (The Heat/Lag Fix) ──
+    private var depthAttemptCounter = 0
+    private var isProcessingYOLO = false
+    // ───────────────────────────────────────────
 
     // MARK: - Init
     override init() {
         super.init()
 
         sceneView.delegate = self
-
         DetectionManager.shared.sceneView = sceneView
 
         DetectionManager.shared.onDebugLog = { [weak self] msg in
             self?.network.sendLog(msg)
         }
         OriginMarkerManager.shared.onDebugLog = { [weak self] msg in
+            self?.network.sendLog(msg)
+        }
+        DepthEstimator.shared.onDebugLog = { [weak self] msg in
             self?.network.sendLog(msg)
         }
 
@@ -75,10 +77,6 @@ final class ARManager: NSObject, ObservableObject {
             guard let self = self else { return }
             self.originData      = data
             self.isOriginVisible = OriginMarkerManager.shared.isVisible
-        }
-
-        DepthEstimator.shared.onDebugLog = { [weak self] msg in
-            self?.network.sendLog(msg)
         }
 
         network.onCommandReceived = { [weak self] command in
@@ -110,7 +108,6 @@ final class ARManager: NSObject, ObservableObject {
     }
 
     // MARK: - Session Management
-
     func startSessionIfNeeded() {
         guard ARWorldTrackingConfiguration.isSupported else { return }
         sceneView.session.delegate = self
@@ -172,7 +169,6 @@ final class ARManager: NSObject, ObservableObject {
         network.sendLog("⏹ STOP")
     }
 
-    // MARK: - Config Builder
     private func buildConfig() -> ARWorldTrackingConfiguration {
         let config            = ARWorldTrackingConfiguration()
         config.worldAlignment = .gravity
@@ -200,17 +196,19 @@ final class ARManager: NSObject, ObservableObject {
 
         isTracking = frame.camera.trackingState == .normal
 
-        // ── Virtual LiDAR — only on non-LiDAR devices ────────────────────────
-        // needsVirtualLiDAR is evaluated once at init; no repeated capability checks.
-        // generateVirtualLiDAR has its own busy-guard, so firing every tick is safe.
+        // ── M5: Virtual LiDAR — fire async, cache result ─────────────────────
         if needsVirtualLiDAR {
-            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-                guard let self = self else { return }
-                if let result = DepthEstimator.shared.generateVirtualLiDAR(
-                        on: frame.capturedImage, frame: frame) {
-                    DispatchQueue.main.async {
-                        self.latestVirtualScan = result.scan
-                        self.depthMapImage     = result.image
+            depthAttemptCounter += 1
+            // Try roughly every 400ms instead of every 100ms
+            if depthAttemptCounter % 4 == 0 {
+                DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                    guard let self = self else { return }
+                    if let result = DepthEstimator.shared.generateVirtualLiDAR(
+                            on: frame.capturedImage, frame: frame) {
+                        DispatchQueue.main.async {
+                            self.latestVirtualScan = result.scan
+                            self.depthMapImage     = result.image
+                        }
                     }
                 }
             }
@@ -228,7 +226,7 @@ final class ARManager: NSObject, ObservableObject {
         for i in 0..<cols {
             if scanArray[i] < 9.9 {
                 if smoothedScan[i] >= 9.9 {
-                    smoothedScan[i] = scanArray[i]   // instant snap on new obstacle
+                    smoothedScan[i] = scanArray[i]
                 } else {
                     smoothedScan[i] = (alpha * scanArray[i]) + ((1.0 - alpha) * smoothedScan[i])
                 }
@@ -239,10 +237,19 @@ final class ARManager: NSObject, ObservableObject {
             }
         }
 
-        // ── System A: YOLO — dispatch to background ───────────────────────────
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let self = self else { return }
-            DetectionManager.shared.processFrame(frame)
+        // ── System A: YOLO (Throttled Queue Lock) ─────────────────────────────
+        // We lock YOLO so it doesn't queue up 100 requests and crash the RAM
+        if !isProcessingYOLO {
+            isProcessingYOLO = true
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                guard let self = self else { return }
+                DetectionManager.shared.processFrame(frame)
+                
+                // Unlock when done so the next tick can grab a new frame
+                DispatchQueue.main.async {
+                    self.isProcessingYOLO = false
+                }
+            }
         }
 
         // ── Build and send state packet ───────────────────────────────────────
@@ -293,13 +300,15 @@ final class ARManager: NSObject, ObservableObject {
         let hFov = 2.0 * atan(Float(imageRes.width)  / (2.0 * fx))
         let vFov = 2.0 * atan(Float(imageRes.height) / (2.0 * fy))
 
+        let thermalState = ProcessInfo.processInfo.thermalState.rawValue
+
         let packet: [String: Any] = [
             "type":            "state",
             "timestamp":       frame.timestamp,
             "position":        [pos.x, pos.y, pos.z],
-            "orientation":     [q.vector.x, q.vector.y,
-                                q.vector.z, q.vector.w],
+            "orientation":     [q.vector.x, q.vector.y, q.vector.z, q.vector.w],
             "fov": ["horizontal": hFov, "vertical": vFov],
+            "thermal_state":   thermalState,
             "laser_scan":      scan,
             "scan_method":     scanMethod,
             "scan_confidence": scanConfidence,
@@ -310,11 +319,6 @@ final class ARManager: NSObject, ObservableObject {
     }
 
     // MARK: - System B: Laser Scan Cascade
-    // M1  — LiDAR depth map         (iPhone 12 Pro only,   confidence 1.0)
-    // M5  — Virtual LiDAR           (iPhone 12 / 11 only,  confidence 0.9)
-    // M2  — ARKit raycast           (fallback during warmup, confidence 0.8)
-    // M3  — HitTest                 (fallback,              confidence 0.5)
-    // M4  — Feature-point cone      (last resort,           confidence 0.2)
     private func getLaserScan(frame: ARFrame)
         -> (distances: [Float], confidence: Float, method: String) {
 
@@ -510,40 +514,33 @@ final class ARManager: NSObject, ObservableObject {
 
 // MARK: - ARSessionDelegate
 extension ARManager: ARSessionDelegate {
-
     func session(_ session: ARSession, didUpdate frame: ARFrame) {}
-
     func session(_ session: ARSession, didAdd anchors: [ARAnchor]) {
         guard let frame = session.currentFrame else { return }
         for anchor in anchors {
             OriginMarkerManager.shared.handleAnchorAdded(anchor, frame: frame)
         }
     }
-
     func session(_ session: ARSession, didUpdate anchors: [ARAnchor]) {
         guard let frame = session.currentFrame else { return }
         for anchor in anchors {
             OriginMarkerManager.shared.handleAnchorUpdated(anchor, frame: frame)
         }
     }
-
     func session(_ session: ARSession, didFailWithError error: Error) {
         network.sendLog("❌ ARSession failed: \(error.localizedDescription)")
         DispatchQueue.main.async { self.isTracking = false }
     }
-
     func sessionWasInterrupted(_ session: ARSession) {
         DispatchQueue.main.async { self.isTracking = false }
     }
-
     func sessionInterruptionEnded(_ session: ARSession) {
         sceneView.session.run(buildConfig())
     }
 }
 
-// MARK: - ARSCNViewDelegate (Handles Plane & Mesh Rendering)
+// MARK: - ARSCNViewDelegate
 extension ARManager: ARSCNViewDelegate {
-
     func renderer(_ renderer: SCNSceneRenderer, nodeFor anchor: ARAnchor) -> SCNNode? {
         let node = SCNNode()
         if let planeAnchor = anchor as? ARPlaneAnchor {
