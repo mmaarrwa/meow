@@ -12,8 +12,8 @@ final class DepthEstimator {
 
     private var model: MLModel?
     private let ciContext = CIContext()
-    private let inputWidth  = 392
-    private let inputHeight = 294
+    private let inputWidth  = 512
+    private let inputHeight = 392
 
     // Busy-guard: if GPU is mid-inference, drop the frame silently
     private var isRunning = false
@@ -200,7 +200,7 @@ final class DepthEstimator {
             return (calibratedScan, depthImage)
 
         } catch {
-            onDebugLog?("❌ Virtual LiDAR failed: \(error)")
+            onDebugLog?("❌ Virtual LiDAR failed: \(error.localizedDescription)")
             return nil
         }
     }
