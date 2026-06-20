@@ -1,7 +1,31 @@
-// --- NEW: State variables for dragging the depth map ---
+import SwiftUI
+import ARKit
+import ReplayKit // NEW: Required for Screen Recording
+
+// MARK: - Main Content View
+struct ContentView: View {
+    @StateObject private var arManager  = ARManager.shared
+    @StateObject private var settings   = SettingsManager.shared
+    @State private var showSettings     = false
+    @State private var showHeightPrompt = false
+    @State private var heightInput      = ""
+
+    // --- State variables for dragging and zooming the depth map ---
     @State private var pipOffset: CGSize = .zero
     @State private var dragOffset: CGSize = .zero
-    // -------------------------------------------------------
+    @State private var pipScale: CGFloat = 1.0
+    @State private var activeScale: CGFloat = 1.0
+    // --------------------------------------------------------------
+    
+    // --- State variables for Thermal State ---
+    @State private var thermalState: ProcessInfo.ThermalState = ProcessInfo.processInfo.thermalState
+    // -----------------------------------------
+    
+    // --- State variables for Screen Recording ---
+    @State private var isRecording = false
+    @State private var showPreview = false
+    @State private var previewVC: RPPreviewViewController? = nil
+    // --------------------------------------------
 
     var body: some View {
         ZStack {
@@ -29,7 +53,19 @@
                     Text(arManager.isTracking ? "Tracking" : "Initializing...")
                         .font(.system(size: 13, weight: .medium, design: .monospaced))
                         .foregroundColor(.white)
+                    
                     Spacer()
+                    
+                    // --- NEW: Thermal Warning Indicator ---
+                    HStack(spacing: 4) {
+                        Image(systemName: "thermometer")
+                        Text(thermalText)
+                            .font(.system(size: 12, weight: .bold, design: .monospaced))
+                    }
+                    .foregroundColor(thermalColor)
+                    .padding(.horizontal, 12)
+                    // --------------------------------------
+                    
                     // Gear icon → toggle sidebar
                     Button(action: { withAnimation(.easeInOut(duration: 0.25)) {
                         showSettings.toggle()
@@ -60,8 +96,19 @@
                         Text(arManager.isStreaming ? "Streaming @ 10Hz" : "Waiting for START...")
                             .font(.system(size: 12, weight: .semibold, design: .monospaced))
                             .foregroundColor(.white)
+                        
                         Spacer()
-                        //adding start/stop button 
+                        
+                        // --- NEW: Screen Record Button ---
+                        Button(action: toggleRecording) {
+                            Image(systemName: isRecording ? "stop.circle.fill" : "record.circle")
+                                .font(.system(size: 24))
+                                .foregroundColor(isRecording ? .red : .white)
+                                .padding(.trailing, 4)
+                        }
+                        // ---------------------------------
+                        
+                        // Start/Stop button 
                         Button(action: {
                             if arManager.isStreaming {
                                 arManager.stopStreaming()
@@ -119,7 +166,7 @@
                 .shadow(radius: 8)
             }
 
-            // ── Layer 4: AI DEPTH MAP VISUALIZER (DRAGGABLE PiP) ───────
+            // ── Layer 4: AI DEPTH MAP VISUALIZER (DRAGGABLE & ZOOMABLE) ───────
             if arManager.isStreaming, let depthImage = arManager.depthMapImage {
                 VStack {
                     Spacer()
@@ -128,16 +175,14 @@
                         Image(uiImage: depthImage)
                             .resizable()
                             .scaledToFit()
-                            .frame(width: 140)
+                            // NEW: Multiply base width by our zoom scale
+                            .frame(width: max(80, 140 * (pipScale * activeScale)))
                             .border(Color.cyan.opacity(0.8), width: 2)
                             .shadow(color: .black.opacity(0.8), radius: 4, x: 0, y: 2)
-                            // 1. Move it completely above the control panel to start
                             .padding(.bottom, 160)
                             .padding(.trailing, 20)
-                            // 2. Apply the active drag offsets
                             .offset(x: pipOffset.width + dragOffset.width,
                                     y: pipOffset.height + dragOffset.height)
-                            // 3. Attach the gesture
                             .gesture(
                                 DragGesture()
                                     .onChanged { value in
@@ -149,9 +194,19 @@
                                         dragOffset = .zero
                                     }
                             )
+                            // NEW: Add Pinch-to-Zoom Gesture
+                            .simultaneousGesture(
+                                MagnificationGesture()
+                                    .onChanged { value in
+                                        activeScale = value
+                                    }
+                                    .onEnded { value in
+                                        pipScale *= value
+                                        activeScale = 1.0
+                                    }
+                            )
                     }
                 }
-                // Ensures this layer takes up the whole screen, making dragging smooth
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
 
@@ -173,18 +228,106 @@
                 showHeightPrompt = true
             }
         }
+        // --- NEW: Thermal State Listener ---
+        .onReceive(NotificationCenter.default.publisher(for: ProcessInfo.thermalStateDidChangeNotification)) { _ in
+            thermalState = ProcessInfo.processInfo.thermalState
+        }
+        // -----------------------------------
         .sheet(isPresented: $showHeightPrompt, onDismiss: {
             arManager.startSessionIfNeeded()
         }) {
             HeightInputView(heightInput: $heightInput,
                             isPresented: $showHeightPrompt)
         }
+        // --- NEW: Screen Recording Sheet ---
+        .sheet(isPresented: $showPreview) {
+            if let previewVC = previewVC {
+                RPPreviewView(previewController: previewVC, isPresented: $showPreview)
+            }
+        }
+        // -----------------------------------
     }
 
     private func hideKeyboard() {
         UIApplication.shared.sendAction(
             #selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
+    
+    // MARK: - ReplayKit Recording Logic
+    private func toggleRecording() {
+        let recorder = RPScreenRecorder.shared()
+        
+        if isRecording {
+            recorder.stopRecording { preview, error in
+                DispatchQueue.main.async {
+                    self.isRecording = false
+                    if let preview = preview {
+                        self.previewVC = preview
+                        self.showPreview = true
+                    } else if let error = error {
+                        print("Screen recording stop error: \(error.localizedDescription)")
+                    }
+                }
+            }
+        } else {
+            // Start recording
+            guard recorder.isAvailable else { return }
+            recorder.startRecording { error in
+                DispatchQueue.main.async {
+                    if let error = error {
+                        print("Screen recording start error: \(error.localizedDescription)")
+                    } else {
+                        self.isRecording = true
+                    }
+                }
+            }
+        }
+    }
+    
+    // MARK: - Thermal State Helpers
+    private var thermalColor: Color {
+        switch thermalState {
+        case .nominal:  return .green
+        case .fair:     return .yellow
+        case .serious:  return .orange
+        case .critical: return .red
+        @unknown default: return .gray
+        }
+    }
+    
+    private var thermalText: String {
+        switch thermalState {
+        case .nominal:  return "NORMAL"
+        case .fair:     return "WARM"
+        case .serious:  return "HOT"
+        case .critical: return "CRITICAL"
+        @unknown default: return "UNKNOWN"
+        }
+    }
+}
+
+// MARK: - ReplayKit View Representable
+struct RPPreviewView: UIViewControllerRepresentable {
+    let previewController: RPPreviewViewController
+    @Binding var isPresented: Bool
+
+    class Coordinator: NSObject, RPPreviewViewControllerDelegate {
+        var parent: RPPreviewView
+        init(_ parent: RPPreviewView) { self.parent = parent }
+        func previewControllerDidFinish(_ previewController: RPPreviewViewController) {
+            parent.isPresented = false
+        }
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeUIViewController(context: Context) -> RPPreviewViewController {
+        previewController.previewControllerDelegate = context.coordinator
+        previewController.modalPresentationStyle = .fullScreen
+        return previewController
+    }
+
+    func updateUIViewController(_ uiViewController: RPPreviewViewController, context: Context) {}
 }
 
 // MARK: - Settings Sidebar
