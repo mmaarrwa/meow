@@ -1,13 +1,7 @@
-import SwiftUI
-import ARKit
-
-// MARK: - Main Content View
-struct ContentView: View {
-    @StateObject private var arManager  = ARManager.shared
-    @StateObject private var settings   = SettingsManager.shared
-    @State private var showSettings     = false
-    @State private var showHeightPrompt = false
-    @State private var heightInput      = ""
+// --- NEW: State variables for dragging the depth map ---
+    @State private var pipOffset: CGSize = .zero
+    @State private var dragOffset: CGSize = .zero
+    // -------------------------------------------------------
 
     var body: some View {
         ZStack {
@@ -57,22 +51,6 @@ struct ContentView: View {
 
                 Spacer()
                 
-                // ── AI DEPTH MAP VISUALIZER (PICTURE-IN-PICTURE) ──
-                HStack {
-                    Spacer() // Pushes the image to the right side
-                    if let depthImage = arManager.depthMapImage {
-                        Image(uiImage: depthImage)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(width: 140) // Adjust minimap size here
-                            .border(Color.cyan.opacity(0.8), width: 2)
-                            .shadow(color: .black.opacity(0.8), radius: 4, x: 0, y: 2)
-                            .padding(.trailing, 20)
-                            .padding(.bottom, 15)
-                    }
-                }
-                // ──────────────────────────────────────────────────
-
                 // Bottom control panel
                 VStack(spacing: 10) {
                     HStack(spacing: 6) {
@@ -141,7 +119,43 @@ struct ContentView: View {
                 .shadow(radius: 8)
             }
 
-            // ── Layer 4: Settings Sidebar (right side overlay) ───────
+            // ── Layer 4: AI DEPTH MAP VISUALIZER (DRAGGABLE PiP) ───────
+            if arManager.isStreaming, let depthImage = arManager.depthMapImage {
+                VStack {
+                    Spacer()
+                    HStack {
+                        Spacer()
+                        Image(uiImage: depthImage)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(width: 140)
+                            .border(Color.cyan.opacity(0.8), width: 2)
+                            .shadow(color: .black.opacity(0.8), radius: 4, x: 0, y: 2)
+                            // 1. Move it completely above the control panel to start
+                            .padding(.bottom, 160)
+                            .padding(.trailing, 20)
+                            // 2. Apply the active drag offsets
+                            .offset(x: pipOffset.width + dragOffset.width,
+                                    y: pipOffset.height + dragOffset.height)
+                            // 3. Attach the gesture
+                            .gesture(
+                                DragGesture()
+                                    .onChanged { value in
+                                        dragOffset = value.translation
+                                    }
+                                    .onEnded { value in
+                                        pipOffset.width += value.translation.width
+                                        pipOffset.height += value.translation.height
+                                        dragOffset = .zero
+                                    }
+                            )
+                    }
+                }
+                // Ensures this layer takes up the whole screen, making dragging smooth
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+
+            // ── Layer 5: Settings Sidebar (right side overlay) ───────
             if showSettings {
                 HStack {
                     Spacer()

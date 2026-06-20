@@ -46,18 +46,6 @@ final class DepthEstimator {
         }
     }
     
-    // MARK: - Dynamic Orientation Helper
-    // The iPhone camera sensor is physically sideways. We must rotate the image
-    // based on how the robot is currently holding the phone!
-    private func currentCameraOrientation() -> CGImagePropertyOrientation {
-        switch UIDevice.current.orientation {
-        case .landscapeLeft:  return .down  // Notch on the right
-        case .landscapeRight: return .up    // Notch on the left (Ideal for AI!)
-        case .portraitUpsideDown: return .left
-        default: return .right // Portrait
-        }
-    }
-
     // MARK: - Public: Sample Metric Depth at a Normalised Screen Coordinate
     func sampleMetricDepth(normX: Float, normY: Float) -> Float? {
         guard let buffer = cachedDepthBuffer else { return nil }
@@ -101,7 +89,8 @@ final class DepthEstimator {
         guard let model = model else { return nil }
 
         // Automatically rotate the buffer so the AI sees an upright world
-        let orientation = currentCameraOrientation()
+        // PULLS CENTRALLY FROM SETTINGS MANAGER
+        let orientation = SettingsManager.shared.currentCameraOrientation()
         let sourceImage = CIImage(cvPixelBuffer: sourcePixelBuffer).oriented(orientation)
         
         guard let inputBuffer = resizedPixelBuffer(
@@ -136,7 +125,10 @@ final class DepthEstimator {
             let pitch = asin(forwardY) // negative = pointing down towards floor
             
             let cameraHeight = Float(SettingsManager.shared.cameraHeight)
-            let verticalFOV: Float = 60.0 * .pi / 180.0
+            // EXACT FOV MATH: fixing from being hardcoded to 60°
+            let fy = frame.camera.intrinsics.columns.1.y
+            let imageResHeight = Float(frame.camera.imageResolution.height)
+            let verticalFOV = 2.0 * atan(imageResHeight / (2.0 * fy))
 
             var aiValues:        [Float] = []
             var trueDisparities: [Float] = []

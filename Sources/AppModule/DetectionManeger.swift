@@ -82,8 +82,11 @@ final class DetectionManager {
         let intrinsics   = frame.camera.intrinsics
         let camTransform = frame.camera.transform
 
+        // SHARED ORIENTATION: Pulls directly from SettingsManager
+        let orientation = SettingsManager.shared.currentCameraOrientation()
+
         let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer,
-                                            orientation: currentCameraOrientation(),
+                                            orientation: orientation,
                                             options: [:])
         do    { try handler.perform([request]) }
         catch { log("Vision perform error: \(error)"); return }
@@ -440,13 +443,4 @@ final class DetectionManager {
         print("[DetectionManager] \(msg)")
     }
 
-    // Add this helper function
-    private func currentCameraOrientation() -> CGImagePropertyOrientation {
-        switch UIDevice.current.orientation {
-        case .landscapeLeft:  return .down  // Notch on right
-        case .landscapeRight: return .up    // Notch on left
-        case .portraitUpsideDown: return .left
-        default: return .right // Portrait
-        }
-    }
 }
