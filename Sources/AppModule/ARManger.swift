@@ -98,6 +98,8 @@ final class ARManager: NSObject, ObservableObject {
                 }
             }
         }.store(in: &cancellables)
+
+        UIDevice.current.beginGeneratingDeviceOrientationNotifications()
     }
 
     private func updateDebugOptions(showMesh: Bool) {
@@ -136,6 +138,7 @@ final class ARManager: NSObject, ObservableObject {
 
     func startStreaming() {
         isStreaming = true
+        UIApplication.shared.isIdleTimerDisabled = true
 
         OriginMarkerManager.shared.isActive = false
         OriginMarkerManager.shared.isActive = true
@@ -158,6 +161,7 @@ final class ARManager: NSObject, ObservableObject {
 
     func stopStreaming() {
         isStreaming = false
+        UIApplication.shared.isIdleTimerDisabled = false
         scanTimer?.invalidate()
         scanTimer = nil
         OriginMarkerManager.shared.isActive = false
@@ -206,6 +210,7 @@ final class ARManager: NSObject, ObservableObject {
                     if let result = DepthEstimator.shared.generateVirtualLiDAR(
                             on: frame.capturedImage, frame: frame) {
                         DispatchQueue.main.async {
+                            guard self.isStreaming else { return }
                             // Only update laser scan when calibration is valid
                             if let scan = result.scan {
                                 self.latestVirtualScan = scan   
@@ -305,6 +310,7 @@ final class ARManager: NSObject, ObservableObject {
         let vFov = 2.0 * atan(Float(imageRes.height) / (2.0 * fy))
 
         let thermalState = ProcessInfo.processInfo.thermalState.rawValue
+        let lowPowerMode = ProcessInfo.processInfo.isLowPowerModeEnabled
 
         let packet: [String: Any] = [
             "type":            "state",
@@ -313,6 +319,7 @@ final class ARManager: NSObject, ObservableObject {
             "orientation":     [q.vector.x, q.vector.y, q.vector.z, q.vector.w],
             "fov": ["horizontal": hFov, "vertical": vFov],
             "thermal_state":   thermalState,
+            "low_power_mode":  lowPowerMode,
             "laser_scan":      scan,
             "scan_method":     scanMethod,
             "scan_confidence": scanConfidence,

@@ -12,7 +12,8 @@ final class DepthEstimator {
 
     private var model: MLModel?
     private let ciContext = CIContext()
-    private let inputWidth  = 518 //fix 518 not 512 ya bakra
+    
+    private let inputWidth  = 518
     private let inputHeight = 392
 
     // Busy-guard: if GPU is mid-inference, drop the frame silently
@@ -37,11 +38,23 @@ final class DepthEstimator {
         }
         do {
             let config = MLModelConfiguration()
-            config.computeUnits = .cpuAndGPU   
+            config.computeUnits = .cpuAndGPU   // bypasses Neural Engine freeze
             model = try MLModel(contentsOf: modelURL, configuration: config)
             onDebugLog?("✅ Depth model loaded")
         } catch {
             onDebugLog?("❌ Depth model failed to load: \(error)")
+        }
+    }
+    
+    // MARK: - Dynamic Orientation Helper
+    // The iPhone camera sensor is physically sideways. We must rotate the image
+    // based on how the robot is currently holding the phone!
+    private func currentCameraOrientation() -> CGImagePropertyOrientation {
+        switch UIDevice.current.orientation {
+        case .landscapeLeft:  return .down  // Notch on the right
+        case .landscapeRight: return .up    // Notch on the left (Ideal for AI!)
+        case .portraitUpsideDown: return .left
+        default: return .right // Portrait
         }
     }
 
@@ -87,7 +100,10 @@ final class DepthEstimator {
 
         guard let model = model else { return nil }
 
-        let sourceImage = CIImage(cvPixelBuffer: sourcePixelBuffer).oriented(.right)
+        // Automatically rotate the buffer so the AI sees an upright world
+        let orientation = currentCameraOrientation()
+        let sourceImage = CIImage(cvPixelBuffer: sourcePixelBuffer).oriented(orientation)
+        
         guard let inputBuffer = resizedPixelBuffer(
                 from: sourceImage,
                 width: inputWidth,
@@ -113,15 +129,18 @@ final class DepthEstimator {
             let elementsPerRow = rowBytes / MemoryLayout<Float16>.stride
 
             // ── 1. DYNAMIC CALIBRATION (Least-Squares in disparity space) ────────
-            let pitch        = frame.camera.eulerAngles.x
-            // FIX 1: Use the physical mounting height from Settings, not ARKit's 0.0 origin!
+            
+            // BULLETPROOF PITCH: By using the camera's Z-axis Look-Vector instead of eulerAngles,
+            // we get the true tilt towards the floor even if the phone is mounted sideways!
+            let forwardY = -frame.camera.transform.columns.2.y
+            let pitch = asin(forwardY) // negative = pointing down towards floor
+            
             let cameraHeight = Float(SettingsManager.shared.cameraHeight)
             let verticalFOV: Float = 60.0 * .pi / 180.0
 
             var aiValues:        [Float] = []
             var trueDisparities: [Float] = []
 
-            // FIX 2: Check physical height, but allow flat-mounted phones to calibrate
             if cameraHeight > 0.1 {
                 let samplePercents: [Float] = [0.75, 0.80, 0.85, 0.90, 0.95]
                 let anchorCol = w / 2
@@ -131,7 +150,6 @@ final class DepthEstimator {
                     let rayPitchOffset   = (percent - 0.5) * verticalFOV
                     let absoluteRayPitch = pitch - rayPitchOffset
                     
-                    // If this specific ray hits the floor, calibrate!
                     if absoluteRayPitch < -0.05 && aiValue > 0 {
                         let trueDepth     = abs(cameraHeight / sin(absoluteRayPitch))
                         let trueDisparity = 1.0 / trueDepth
@@ -147,10 +165,6 @@ final class DepthEstimator {
                 let a = fit.a
                 let b = fit.b
 
-                // ── Cache for DetectionManager.sampleMetricDepth() ───────────────────
-                if cachedDepthBuffer == nil {  // first time only
-                    onDebugLog?("🎯 First successful depth calibration: a=\(a), b=\(b)")
-                }
                 cachedDepthBuffer = depthBuffer
                 cachedCalibration = (a, b)
 
@@ -189,7 +203,6 @@ final class DepthEstimator {
                     virtualScan[col] = colMin
                 }
                 
-                // Calibration succeeded, safe to populate the scan array
                 calibratedScan = virtualScan
             }
 
@@ -200,7 +213,7 @@ final class DepthEstimator {
             return (calibratedScan, depthImage)
 
         } catch {
-            onDebugLog?("❌ Virtual LiDAR failed: \(error.localizedDescription)")
+            onDebugLog?("❌ Virtual LiDAR failed: \(error)")
             return nil
         }
     }
@@ -240,6 +253,7 @@ final class DepthEstimator {
                 bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
               let cgImage = ctx.makeImage() else { return UIImage() }
 
+        // Use .up because the CIImage is already physically upright!
         return UIImage(cgImage: cgImage, scale: 1.0, orientation: .up)
     }
 

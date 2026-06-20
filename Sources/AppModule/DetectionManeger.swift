@@ -83,7 +83,7 @@ final class DetectionManager {
         let camTransform = frame.camera.transform
 
         let handler = VNImageRequestHandler(cvPixelBuffer: pixelBuffer,
-                                            orientation: .right,
+                                            orientation: currentCameraOrientation(),
                                             options: [:])
         do    { try handler.perform([request]) }
         catch { log("Vision perform error: \(error)"); return }
@@ -438,5 +438,15 @@ final class DetectionManager {
     private func log(_ msg: String) {
         onDebugLog?(msg)
         print("[DetectionManager] \(msg)")
+    }
+
+    // Add this helper function
+    private func currentCameraOrientation() -> CGImagePropertyOrientation {
+        switch UIDevice.current.orientation {
+        case .landscapeLeft:  return .down  // Notch on right
+        case .landscapeRight: return .up    // Notch on left
+        case .portraitUpsideDown: return .left
+        default: return .right // Portrait
+        }
     }
 }
