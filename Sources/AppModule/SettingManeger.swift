@@ -89,6 +89,16 @@ final class SettingsManager: ObservableObject {
         showDebugMesh   = UserDefaults.standard.bool(forKey: "showDebugMesh")
         serverIP             = UserDefaults.standard.string(forKey: "serverIP") ?? "192.168.1.10"
     }
+    // MARK: - Dynamic Orientation Helper
+    // Shared across the app for YOLO and Depth models
+    func currentCameraOrientation() -> CGImagePropertyOrientation {
+        switch UIDevice.current.orientation {
+            case .landscapeLeft:  return .up    // FLIPPED to fix the 180-degree bug
+            case .landscapeRight: return .down  // FLIPPED to fix the 180-degree bug
+            case .portraitUpsideDown: return .left
+            default: return .right // Portrait
+        }
+    }
 }
 
 // MARK: - Helpers
@@ -102,13 +112,3 @@ private extension Int {
     var nonZero: Int? { self == 0 ? nil : self }
 }
 
-// MARK: - Dynamic Orientation Helper
-// Shared across the app for YOLO and Depth models
-func currentCameraOrientation() -> CGImagePropertyOrientation {
-    switch UIDevice.current.orientation {
-        case .landscapeLeft:  return .up    // FLIPPED to fix the 180-degree bug
-        case .landscapeRight: return .down  // FLIPPED to fix the 180-degree bug
-        case .portraitUpsideDown: return .left
-        default: return .right // Portrait
-    }
-}
