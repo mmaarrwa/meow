@@ -16,7 +16,7 @@ struct DetectedObject: Identifiable {
 }
 
 // MARK: - DetectionManager
-// Runs YOLOv8 inference and computes per-detection world position using
+// Runs SurveyingModel_v1 inference and computes per-detection world position using
 // a 6-stage cascade. World position is always in the ARKit world frame
 // (origin = where START was pressed).
 
@@ -52,9 +52,9 @@ final class DetectionManager {
 
     // MARK: - Model Setup
     private func setupModel() {
-        guard let modelURL = Bundle.main.url(forResource: "yolov8n", withExtension: "mlmodelc")
-                          ?? Bundle.main.url(forResource: "yolov8n", withExtension: "mlpackage") else {
-            log("⚠️ YOLOv8n model not found")
+        guard let modelURL = Bundle.main.url(forResource: "SurveyingModel_v1", withExtension: "mlmodelc")
+                          ?? Bundle.main.url(forResource: "SurveyingModel_v1", withExtension: "mlpackage") else {
+            log("⚠️ SurveyingModel_v1 model not found")
             return
         }
         do {
@@ -66,7 +66,7 @@ final class DetectionManager {
                 if let error = error { self?.log("Vision error: \(error)") }
             }
             visionRequest?.imageCropAndScaleOption = .scaleFill
-            log("✅ YOLOv8n loaded")
+            log("✅ SurveyingModel_v1 loaded")
         } catch {
             log("❌ Failed to load model: \(error)")
         }
