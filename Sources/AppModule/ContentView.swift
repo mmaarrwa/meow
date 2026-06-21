@@ -167,7 +167,7 @@ struct ContentView: View {
             }
 
             // ── Layer 4: AI DEPTH MAP VISUALIZER (DRAGGABLE & ZOOMABLE) ───────
-            if arManager.isStreaming, let depthImage = arManager.depthMapImage {
+            if arManager.isStreaming, settings.showDepthMap, let depthImage = arManager.depthMapImage {
                 VStack {
                     Spacer()
                     HStack {
@@ -484,6 +484,12 @@ struct SettingsSidebar: View {
                         .padding(.vertical, 4)
 
                     Toggle("Show LiDAR Mesh", isOn: $settings.showDebugMesh)
+                        .font(.system(size: 13, design: .monospaced))
+                        .foregroundColor(.white)
+                        .tint(.cyan)
+                        .padding(.vertical, 4)
+                    
+                    Toggle("Show Depth Map", isOn: $settings.showDepthMap)
                         .font(.system(size: 13, design: .monospaced))
                         .foregroundColor(.white)
                         .tint(.cyan)

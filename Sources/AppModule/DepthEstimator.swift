@@ -198,10 +198,13 @@ final class DepthEstimator {
                 calibratedScan = virtualScan
             }
 
-            // ── 3. VISUALISATION (ALWAYS RUNS) ──────────────────────────────────
-            let depthImage = normaliseDepthToImage(
-                ptr: ptr, w: w, h: h, elementsPerRow: elementsPerRow)
-
+            // ── 3. VISUALISATION (only if enabled) ──────────────────────────────
+            let depthImage: UIImage
+            if SettingsManager.shared.showDepthMap {
+                depthImage = normaliseDepthToImage(ptr: ptr, w: w, h: h, elementsPerRow: elementsPerRow)
+            } else {
+                depthImage = UIImage()  // cheap placeholder; ContentView won't display it anyway since the toggle is off
+            }
             return (calibratedScan, depthImage)
 
         } catch {

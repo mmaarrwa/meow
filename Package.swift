@@ -16,9 +16,9 @@ let package = Package(
             path: "Sources",
             resources: [
                 .process("../Info.plist"),
-                // The YOLOv8n CoreML model package
-                // Download from: https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n.mlpackage.zip
-                // Place it at: Sources/AppModule/yolov8n.mlpackage
+                // The SurveyingModel_v1 CoreML model package
+                // Download from: https://github.com/ultralytics/assets/releases/download/v0.0.0/SurveyingModel_v1.mlpackage.zip
+                // Place it at: Sources/AppModule/SurveyingModel_v1.mlpackage
                 .process("AppModule/SurveyingModel_v1.mlpackage"),
                 .process("AppModule/DepthAnythingV2SmallF16.mlpackage"),
                 .process("AppModule/origin_marker.png") // See setup instructions in OriginManager.swift

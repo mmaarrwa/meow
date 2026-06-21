@@ -50,6 +50,9 @@ final class SettingsManager: ObservableObject {
     @Published var showDebugMesh: Bool {
         didSet { UserDefaults.standard.set(showDebugMesh, forKey: "showDebugMesh") }
     }
+    @Published var showDepthMap: Bool {
+    didSet { UserDefaults.standard.set(showDepthMap, forKey: "showDepthMap") }
+    }
 
     // MARK: - Detection (System A)
     @Published var confidenceThreshold: Float {
@@ -87,6 +90,7 @@ final class SettingsManager: ObservableObject {
                                 .nonZero ?? 0.40
         showDebugPlanes = UserDefaults.standard.bool(forKey: "showDebugPlanes")
         showDebugMesh   = UserDefaults.standard.bool(forKey: "showDebugMesh")
+        showDepthMap = UserDefaults.standard.bool(forKey: "showDepthMap")
         serverIP             = UserDefaults.standard.string(forKey: "serverIP") ?? "192.168.1.10"
     }
     // MARK: - Dynamic Orientation Helper
